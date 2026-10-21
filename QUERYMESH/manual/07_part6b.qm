@@ -1,0 +1,819 @@
+# PART 6B - ADVANCED: Docker images, Compose, Kubernetes with Helm, deployment on FakeCloud and AWS EKS, CI/CD
+## 6B.0 What, why, when
+What: you pack QueryMesh into two Docker images, run the whole system with one Docker Compose command, then deploy it to Kubernetes with a Helm chart: first on kind (a free local Kubernetes on your Hyperstack VM, practised against FakeCloud), then on real AWS EKS behind an Application Load Balancer, with secrets synced from AWS Secrets Manager by the External Secrets Operator. Finally GitHub Actions tests, builds, pushes and deploys every change automatically.
+Why: resume lines 10 and 11. "It works on my VM" is not production. Images make the app identical everywhere; Kubernetes restarts crashed pods and runs replicas; Helm makes the deployment one repeatable command; ESO keeps passwords out of Git; OIDC lets GitHub deploy without storing any AWS key.
+When: after Part 6A works end to end (five agents + API + Gradio answering a question).
+This part builds on: every file from Parts 4 to 6A, the .env file (Section 2B.8), vLLM and OpenSearch on the VM (Sections 2B.10 and 2B.11), FakeCloud and the AWS CLI (Section 2B.12).
+## BEFORE YOU START: the words of this part
+§ Word § Plain meaning
+§ Docker image § a frozen package: Linux + Python + your code + its libraries. Built once, runs the same everywhere
+§ container § a running copy of an image
+§ Dockerfile § the recipe that builds an image, step by step
+§ multi-stage build / target § one Dockerfile that can produce several images; `--target app` stops at the stage called app
+§ Docker Compose § starts many containers together from one YAML file
+§ registry § an online store for images. AWS ECR is your private one; FakeCloud has a working copy at localhost:4566
+§ Kubernetes (K8s) § software that runs containers on a group of machines, restarts them when they crash and spreads traffic
+§ pod § the smallest thing Kubernetes runs: one (or a few) containers with their own IP address
+§ Deployment § "keep N copies of this pod running"
+§ Service § a stable name and port in front of pods, e.g. querymesh-api:80
+§ ConfigMap / Secret § settings given to pods as environment variables (Secret = for passwords and keys)
+§ CronJob § a pod Kubernetes starts on a schedule (our nightly ingestion)
+§ Ingress § a rule "send web traffic for these paths to these Services"
+§ kind § "Kubernetes IN Docker": a real Kubernetes cluster whose machines are Docker containers on your VM. Free
+§ kubectl § the command-line remote control for any Kubernetes cluster
+§ Helm / chart § Helm is the package manager of Kubernetes; a chart is a folder of templates + values that becomes all the YAML
+§ EKS § Elastic Kubernetes Service: AWS runs the Kubernetes control plane for you (US$0.10 per hour) [36]
+§ eksctl § the official command-line tool that creates an EKS cluster (VPC, subnets, machines, IAM) from one YAML file [37]
+§ node group § the EC2 machines (here 2 x t3.large) where your pods run
+§ ALB § Application Load Balancer: the public web entrance AWS creates for your Ingress [38]
+§ AWS Load Balancer Controller § a pod that watches Ingress objects and creates/deletes ALBs for them
+§ ESO § External Secrets Operator: a pod that copies secrets from AWS Secrets Manager into Kubernetes Secrets [39]
+§ Pod Identity § lets one Kubernetes service account use one IAM role, without any key on disk
+§ OIDC (GitHub) § GitHub proves to AWS "this job runs in repo X" with a short-lived token, so no AWS keys are stored in GitHub [40]
+
+The plan of this part:
+§ Sections § What you do § Where it runs
+§ 6B.1 - 6B.2 § build the images, run everything with Docker Compose § Hyperstack VM
+§ 6B.3 - 6B.4 § install kind, kubectl, helm; create the local cluster § Hyperstack VM
+§ 6B.5 - 6B.10 § registry, secrets, cluster, OpenSearch, secrets into the cluster, load balancer § two columns: FakeCloud + kind (white) and real AWS EKS (light blue)
+§ 6B.11 - 6B.13 § the Helm chart, install it, test it, first ingestion § both columns
+§ 6B.14 § CI/CD with GitHub Actions § GitHub + both columns for IAM
+§ 6B.15 § delete everything so the bill stops § both columns
+
+How to use the two-column tables: do every row of ONE column, top to bottom. The white column is FakeCloud + kind (free practice, do it first). The light blue column is real AWS (costs money, do it only when the white column worked). "same" means: type exactly the command from the white column.
+Watch out: real AWS EKS costs about US$0.34 per hour while it runs (cost table in Section 6B.15), on top of the Hyperstack VM. Do the AWS column in one sitting and finish with Section 6B.15 the same day.
+What was checked while writing this part: the Helm chart was linted and rendered with Helm v4.3.1 (18 Kubernetes objects, no errors) and the Compose file was validated with docker compose config. The Docker builds, kind and EKS steps were written from the official documentation and were NOT run by us; marked (verify) where a detail may differ on your screen.
+## SECTION 6B.1 - Create the Dockerfile and build the two images
+WHERE: VS Code connected to the VM (Section 2A.10), Explorer panel, folder ~/querymesh
+GOAL: two images on the VM: querymesh:v1 (API, 5 agents, Gradio, Telegram) and querymesh-ingest:v1 (the same + Docling for PDFs).
+Step 1. Create the file Dockerfile (no extension, capital D) in the project root with the procedure from Section 2B.3.
+Step 2. Paste this content and press Ctrl+S:
+@code Dockerfile
+§ Line(s) § What it does (plain English)
+§ the three # lines § comments: how to build each of the two images
+§ `FROM public.ecr.aws/docker/library/python:3.12-slim AS app` § start from a small Debian Linux with Python 3.12. We take it from the AWS ECR Public mirror of Docker Hub, which avoids Docker Hub's anonymous download limit (HTTP 429). `AS app` names this stage "app"
+§ `COPY --from=ghcr.io/astral-sh/uv:0.11.32 /uv /usr/local/bin/uv` § copy only the uv program out of the official uv image into ours (fast installer, Section 2B.5)
+§ `ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1` § print log lines immediately (so docker logs shows them) and do not write .pyc files
+§ `WORKDIR /app` § every following command runs in the folder /app inside the image
+§ `COPY pyproject.toml ./` § copy the list of libraries first
+§ `COPY querymesh ./querymesh` § copy the Python package (only this folder: no .env, no data, no tests)
+§ `RUN uv pip install --system --no-cache .` § install QueryMesh and all libraries from pyproject.toml into the image's Python. `--no-cache` keeps the image smaller
+§ `RUN useradd --create-home appuser` and `USER appuser` § create a normal user and run as that user, not as root (if someone breaks in, they are not root)
+§ `EXPOSE 8090 8101 ... 7860` § documents which ports the programs listen on (API, five agents, Gradio)
+§ `CMD ["uvicorn", "querymesh.api:app", ...]` § the default program: the API on port 8090. Agents and UIs override it with their own command
+§ `FROM app AS ingest` § a second stage that starts from everything in "app"
+§ `USER root` § installing needs root
+§ `RUN uv pip install ... torch torchvision --index-url https://download.pytorch.org/whl/cpu` § install the CPU-only PyTorch (about 0.2 GB instead of several GB for the GPU build). Docling needs PyTorch for its layout model
+§ `&& uv pip install --system --no-cache ".[ingest]"` § then install Docling (the "ingest" extra in pyproject.toml)
+§ `USER appuser` § back to the normal user
+§ `CMD ["python", "-m", "querymesh.ingest", "--max-papers", "5"]` § default program of this image: one ingestion run
+Step 3. Create the file .dockerignore in the project root (Section 2B.3 procedure).
+Step 4. Paste this content and press Ctrl+S:
+@code .dockerignore
+§ Line § What it does (plain English)
+§ `.venv` § your local virtual environment is not copied into the image (the image installs its own)
+§ `.env` § your passwords never end up inside an image (images can be shared and pushed)
+§ `data` § downloaded PDFs and the eval file stay out
+§ `.git`, `__pycache__`, `.pytest_cache`, `.logfire` § Git history, Python caches and Logfire's local credentials stay out
+Step 5. Open a terminal: Terminal > New Terminal.
+Step 6. Go to the project root:
+```
+cd ~/querymesh
+```
+Step 7. Build the app image (2 to 5 minutes the first time):
+```
+docker build --target app -t querymesh:v1 .
+```
+You should see: lines like `[app 6/8] RUN uv pip install --system --no-cache .` and at the end `naming to docker.io/library/querymesh:v1`.
+Step 8. Build the ingest image (5 to 10 minutes, it downloads PyTorch):
+```
+docker build --target ingest -t querymesh-ingest:v1 .
+```
+You should see: `naming to docker.io/library/querymesh-ingest:v1`.
+Step 9. List the images:
+```
+docker images | grep querymesh
+```
+You should see: two lines, querymesh v1 (roughly 0.6 to 1 GB) and querymesh-ingest v1 (roughly 2 to 3 GB) (verify: sizes depend on library versions).
+Step 10. Check that the code inside the image imports:
+```
+docker run --rm querymesh:v1 python -c "import querymesh.graph, querymesh.agents; print('image ok')"
+```
+You should see: image ok
+§ Piece § What it does
+§ `--target app` § stop at the stage named app
+§ `-t querymesh:v1` § the image name (querymesh) and tag (v1)
+§ `.` (the final dot) § the build context = the current folder; COPY takes files from here
+§ `docker run --rm` § start a container and delete it when it finishes
+§ If you see... § It means... § Do this next
+§ `429 Too Many Requests` § a registry download limit § wait 10 minutes and run the same build again
+§ `COPY failed: file not found` § you are not in ~/querymesh § run `cd ~/querymesh` and build again
+§ `No space left on device` § old images fill the disk § run `docker system prune -f` and build again
+§ `ModuleNotFoundError` in Step 10 § a file is missing in querymesh/ § compare `ls querymesh` with the file list of Part 6A, add the missing file, rebuild
+Watch out: every time you change Python code, you must rebuild the image (Step 7) before Compose or Kubernetes see the change. Docker caches unchanged layers, so rebuilds take seconds when only your code changed.
+CHECKPOINT: `docker images | grep querymesh` shows both images and Step 10 prints image ok.
+If not: read the first red ERROR line of the build output; it names the failing line of the Dockerfile.
+## SECTION 6B.2 - Run the whole system with Docker Compose
+WHERE: VS Code Terminal, folder ~/querymesh
+GOAL: five agents + API + Gradio (+ optional Telegram) start with one command, as containers.
+Step 1. Stop every QueryMesh program you started by hand in Part 6A (they hold ports 8090, 8101-8105 and 7860):
+```
+pkill -f "querymesh.agents|uvicorn querymesh.api|querymesh.ui_gradio|querymesh.ui_telegram"
+```
+Step 2. Check that the ports are free:
+```
+ss -ltnp | grep -E ":(8090|810[1-5]|7860) " || echo "ports are free"
+```
+You should see: ports are free
+Step 3. Check that vLLM and OpenSearch (which stay outside Compose) are running:
+```
+docker ps --format '{{.Names}}  {{.Status}}' | grep -E "vllm|opensearch"
+```
+You should see: two lines, vllm Up ... and opensearch Up ...
+Step 4. Create the file docker-compose.yml in the project root (Section 2B.3 procedure).
+Step 5. Paste this content and press Ctrl+S:
+@code docker-compose.yml
+§ Line(s) § What it does (plain English)
+§ the two # lines § OpenSearch and vLLM are not in this file: they already run on the VM, and containers reach the VM through the name host.docker.internal
+§ `x-app: &app` § a reusable block of settings (YAML "anchor" named app). Compose ignores keys that start with x-
+§ `image: querymesh:v1` § every service uses the image from Section 6B.1
+§ `env_file: .env` § every container gets all lines of your .env as environment variables
+§ `restart: unless-stopped` § Docker restarts a crashed container and starts it again after a VM reboot
+§ `extra_hosts: ["host.docker.internal:host-gateway"]` § inside the containers, the name host.docker.internal points to the VM itself (172.17.0.1)
+§ `environment: &app-env` § settings that REPLACE the same lines of .env, saved as a second anchor
+§ `OPENSEARCH_URL: http://host.docker.internal:9200` § inside a container "localhost" is the container itself, so OpenSearch is reached via the VM's Docker address
+§ `LLM_BASE_URL: http://host.docker.internal:8000/v1` § the same for vLLM
+§ `WORKER_MODE: remote` § the supervisor calls the agents over MCP/SSE (Part 6A), not in-process
+§ `AGENT_URLS: http://retriever:8101,...` § inside Compose every service is reachable by its service name
+§ `retriever:` ... `<<: *app` § a service that copies all settings of the app block (the << means "merge in")
+§ `command: ["python", "-m", "querymesh.agents", "retriever"]` § replaces the image's default command: start the retriever agent
+§ `environment: {<<: *app-env, PUBLIC_URL: "http://retriever:8101"}` § the shared settings plus this agent's own address, written into its Agent Card
+§ grader, writer, critic, scout § the same pattern for the other four agents
+§ `api:` with `ports: ["8090:8090"]` § the API uses the image's default command (uvicorn) and is published on the VM's port 8090
+§ `depends_on: [retriever, ...]` § start the agents before the API
+§ `gradio:` with `API_URL: "http://api:8090"` § the web UI talks to the API container by name; published on port 7860
+§ `telegram:` with `profiles: ["telegram"]` § the bot only starts when you ask for the telegram profile
+Step 6. Check the file (this prints nothing when it is valid):
+```
+docker compose config --quiet && echo "compose file ok"
+```
+You should see: compose file ok
+Step 7. Start everything in the background:
+```
+docker compose up -d
+```
+You should see: lines like `Container querymesh-retriever-1  Started` for 7 containers.
+Step 8. Look at their state:
+```
+docker compose ps
+```
+You should see: 7 lines (retriever, grader, writer, critic, scout, api, gradio), STATUS Up.
+Step 9. Follow the API log for a few seconds (press Ctrl+C to stop following; the containers keep running):
+```
+docker compose logs -f api
+```
+You should see: `Uvicorn running on http://0.0.0.0:8090`.
+Step 10. Read your API password into the terminal:
+```
+API_PASSWORD=$(grep '^API_PASSWORD=' .env | cut -d= -f2)
+```
+Step 11. Log in and keep the token:
+```
+TOKEN=$(curl -s -X POST localhost:8090/token -d "username=admin&password=$API_PASSWORD" | jq -r .access_token) && echo ${TOKEN:0:20}
+```
+You should see: the first 20 characters of the token, starting with eyJ.
+Step 12. Ask a question through the containers:
+```
+curl -s -X POST localhost:8090/ask -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"question": "How does reciprocal rank fusion combine keyword and vector search?"}' | jq
+```
+You should see: JSON with "answer", "citations", "grounded": true and "cached": false (20 to 60 seconds). Run Step 12 again: "cached": true comes back in under a second.
+Step 13. Open the web UI: in VS Code click the PORTS tab, click Forward a Port, type 7860, press Enter, then click the globe icon next to port 7860 (Section 2A.12).
+You should see: the QueryMesh chat page in your laptop's browser.
+Step 14. (Optional, only if you created the Telegram bot in Section 6A.10) start the bot container:
+```
+docker compose --profile telegram up -d telegram
+```
+Step 15. When you are done testing, stop and remove the containers (Kubernetes takes over next):
+```
+docker compose down
+```
+You should see: `Container ... Removed` lines.
+§ If you see... § It means... § Do this next
+§ `Bind for 0.0.0.0:8090 failed: port is already allocated` § a Part 6A program still runs § repeat Step 1, then Step 7
+§ api log: `Connection refused` to host.docker.internal:9200 § OpenSearch is not running or bound elsewhere § run `bash scripts/start_opensearch.sh` and wait 30 seconds
+§ /ask returns 500 and the retriever log shows `index_not_found_exception` § the index is empty in this OpenSearch § run an ingestion first (Section 4.5)
+§ /ask answers with an LLM error § vLLM is down or LLM_API_KEY differs § `docker logs vllm --tail 20`; compare LLM_API_KEY in .env with the key vLLM was started with
+Watch out: Compose reads .env at start. After you change .env, run `docker compose up -d` again so the containers get the new values.
+CHECKPOINT: Step 12 returns a grounded answer with citations from the containers, and the web UI works on port 7860.
+If not: `docker compose logs --tail 50 SERVICE` (for example retriever) shows the error of that one container.
+## SECTION 6B.3 - Install kind, kubectl and helm on the VM
+WHERE: VS Code Terminal on the VM
+GOAL: the three Kubernetes tools are installed; eksctl too, for the AWS column.
+Step 1. Download kind v0.33.0 [32]:
+```
+curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.33.0/kind-linux-amd64
+```
+Step 2. Make it executable:
+```
+chmod +x ./kind
+```
+Step 3. Move it to a folder on your PATH:
+```
+sudo mv ./kind /usr/local/bin/kind
+```
+Step 4. Check:
+```
+kind version
+```
+You should see: kind v0.33.0 go1... linux/amd64
+Step 5. Download kubectl v1.37.1 [33]:
+```
+curl -LO "https://dl.k8s.io/release/v1.37.1/bin/linux/amd64/kubectl"
+```
+Step 6. Install it:
+```
+sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && rm kubectl
+```
+Step 7. Check:
+```
+kubectl version --client
+```
+You should see: Client Version: v1.37.1
+Step 8. Download the official Helm 4 installer [34]:
+```
+curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-4
+```
+Step 9. Make it executable:
+```
+chmod 700 get_helm.sh
+```
+Step 10. Run it:
+```
+./get_helm.sh && rm get_helm.sh
+```
+Step 11. Check:
+```
+helm version --short
+```
+You should see: v4.3.1 (or a newer v4.x)
+Step 12. (Needed only for the light blue AWS column) download eksctl [37]:
+```
+curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz"
+```
+Step 13. Unpack it into /tmp:
+```
+tar -xzf eksctl_Linux_amd64.tar.gz -C /tmp && rm eksctl_Linux_amd64.tar.gz
+```
+Step 14. Install it:
+```
+sudo install -m 0755 /tmp/eksctl /usr/local/bin && rm /tmp/eksctl
+```
+Step 15. Check:
+```
+eksctl version
+```
+You should see: 0.231.0 (or newer)
+CHECKPOINT: kind version, kubectl version --client, helm version --short (and eksctl version) all print a version.
+If not: `command not found` means the file is not in /usr/local/bin: repeat the install step of that tool.
+## SECTION 6B.4 - Create the local Kubernetes cluster with kind
+WHERE: VS Code, project ~/querymesh
+GOAL: a working 2-machine Kubernetes cluster called querymesh, running as Docker containers on the VM.
+Step 1. Create the folders for the deployment files:
+```
+mkdir -p ~/querymesh/deploy/k8s ~/querymesh/deploy/aws ~/querymesh/deploy/helm/querymesh/templates
+```
+Step 2. Create the file deploy/k8s/kind-config.yaml (Section 2B.3 procedure).
+Step 3. Paste this content and press Ctrl+S:
+@code deploy/k8s/kind-config.yaml
+§ Line § What it does (plain English)
+§ `kind: Cluster` and `apiVersion: kind.x-k8s.io/v1alpha4` § this file describes a kind cluster (format version v1alpha4)
+§ `name: querymesh` § the cluster name; kubectl calls it kind-querymesh
+§ `- role: control-plane` § one container that runs the Kubernetes "brain" (API server, scheduler)
+§ `- role: worker` § one container where your pods run
+Step 4. Create the cluster (1 to 3 minutes):
+```
+kind create cluster --config deploy/k8s/kind-config.yaml
+```
+You should see: checkmarks for "Ensuring node image", "Preparing nodes", "Starting control-plane", "Joining worker nodes", then `Set kubectl context to "kind-querymesh"`.
+Step 5. Ask the cluster for its machines:
+```
+kubectl get nodes
+```
+You should see: querymesh-control-plane and querymesh-worker, STATUS Ready.
+Step 6. Check which Docker address the cluster uses to reach the VM (vLLM is reached there):
+```
+ip -4 addr show docker0 | grep inet
+```
+You should see: inet 172.17.0.1/16 ... This is the address used in values-kind.yaml (Section 6B.11). If you see a different address, write it down: you will use it in Section 6B.12.
+Watch out: kind stores its kubectl settings in ~/.kube/config. Later, eksctl adds the EKS cluster to the same file. `kubectl config current-context` always tells you which cluster your next kubectl command will touch: kind-querymesh (local) or an EKS name (real money).
+CHECKPOINT: `kubectl get nodes` shows 2 nodes Ready.
+If not: `docker ps` must list querymesh-control-plane and querymesh-worker. If the create failed, run `kind delete cluster --name querymesh` and repeat Step 4.
+## SECTION 6B.5 - Create the image registry and push the images
+WHERE: VS Code Terminal, folder ~/querymesh. FakeCloud running (Section 2B.12).
+GOAL: both images are stored in a registry: FakeCloud ECR (white) or real AWS ECR (light blue).
+Step 1. Check that FakeCloud is healthy (white column) or that your AWS keys work (light blue column):
+```
+curl -s localhost:4566/_fakecloud/health | head -c 80; echo; aws sts get-caller-identity --query Account --output text
+```
+Step 2. Do the rows of your column, top to bottom, in ONE terminal (the export lines live only in this terminal):
+!blue
+§ Step § FakeCloud (free practice) § Real AWS (same step)
+§ 1 Choose the target § `source scripts/use_fakecloud.sh` § `source scripts/use_aws.sh`
+§ 2 Remember the account § `export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text) && echo $ACCOUNT_ID` § same (prints your real 12-digit account ID)
+§ 3 Registry address § `export REGISTRY=localhost:4566` § `export REGISTRY=$ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com`
+§ 4 Create the app repository § `aws ecr create-repository --repository-name querymesh --image-scanning-configuration scanOnPush=true` § same
+§ 5 Create the ingest repository § `aws ecr create-repository --repository-name querymesh-ingest --image-scanning-configuration scanOnPush=true` § same
+§ 6 Log Docker in § `aws ecr get-login-password | docker login --username AWS --password-stdin $REGISTRY` § same
+§ 7 Second name for the app image § `docker tag querymesh:v1 $REGISTRY/querymesh:v1` § same
+§ 8 Second name for the ingest image § `docker tag querymesh-ingest:v1 $REGISTRY/querymesh-ingest:v1` § same
+§ 9 Push the app image § `docker push $REGISTRY/querymesh:v1` § same (uploads about 0.6-1 GB)
+§ 10 Push the ingest image § `docker push $REGISTRY/querymesh-ingest:v1` § same (uploads about 2-3 GB, a few minutes)
+§ 11 Verify § `aws ecr describe-images --repository-name querymesh --query 'imageDetails[].imageTags'` § same; or console: ECR > Private registry > Repositories > querymesh
+§ You should see § `Login Succeeded` at row 6, `v1: digest: sha256:...` at rows 9-10, `[["v1"]]` at row 11 § the same, and both repositories in the ECR console
+§ 12 Load the images into kind (the local cluster pulls from the VM's Docker, not from a registry) § `kind load docker-image querymesh:v1 --name querymesh` then `kind load docker-image querymesh-ingest:v1 --name querymesh` § not applicable: EKS machines pull from ECR by themselves
+§ Piece § What it does
+§ `get-login-password` piped into `docker login --password-stdin` § ECR gives a 12-hour password; the pipe avoids typing it or saving it in your history
+§ `docker tag LOCAL REGISTRY/REPO:TAG` § a second name for the same image that says where to push it
+§ `scanOnPush=true` § AWS scans each pushed image for known security holes (FakeCloud returns empty findings)
+§ `kind load docker-image` § copies an image from the VM's Docker into the kind machines, so pods can start it without any registry
+Watch out: if you open a new terminal, rows 1-3 are gone. Run them again before any later row that uses $ACCOUNT_ID or $REGISTRY.
+Watch out: before every light blue row, `echo $AWS_ENDPOINT_URL` must print an empty line. If it prints http://localhost:4566 you are still talking to FakeCloud.
+CHECKPOINT: row 11 lists the tag v1 in your column (and, white column, row 12 finished without error).
+If not: `no basic auth credentials` at a push = row 6 was done in another terminal or more than 12 hours ago: repeat row 6.
+## SECTION 6B.6 - Store the secrets in Secrets Manager
+WHERE: VS Code Terminal, folder ~/querymesh, same terminal as Section 6B.5
+GOAL: one JSON secret querymesh/app holds every password and key the pods need. Nothing secret goes into Git, the chart or the images.
+Which lines are secret: only these ten keys go into the secret. Everything else (OPENSEARCH_URL, LLM_BASE_URL, AGENT_URLS, WORKER_MODE, API_URL, the AWS_ lines...) is NOT copied: the AWS_ lines point at FakeCloud on the VM, and the addresses inside the cluster come from the chart's ConfigMap (Section 6B.11).
+§ Key § Why the pods need it
+§ JINA_API_KEY § retriever and ingestion create embeddings
+§ LLM_API_KEY § the key vLLM was started with
+§ REDIS_URL § the Upstash cache (rediss://...), reachable from anywhere
+§ JWT_SECRET § the API signs and checks tokens
+§ API_PASSWORD § the login checked by the API and used by Gradio/Telegram
+§ LOGFIRE_TOKEN § tracing (Section 6A.5)
+§ LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_BASE_URL § token tracking (Section 6A.6)
+§ TELEGRAM_BOT_TOKEN § only if you use the bot
+Step 1. Check the target of this terminal:
+```
+echo "${AWS_ENDPOINT_URL:-REAL AWS}"
+```
+You should see: http://localhost:4566 in the white column, REAL AWS in the light blue column. If it is wrong, run `source scripts/use_fakecloud.sh` or `source scripts/use_aws.sh`.
+Step 2. Copy only the secret lines that have a value into a temporary file (same in both columns):
+```
+grep -E '^(JINA_API_KEY|LLM_API_KEY|REDIS_URL|JWT_SECRET|API_PASSWORD|LOGFIRE_TOKEN|LANGFUSE_PUBLIC_KEY|LANGFUSE_SECRET_KEY|LANGFUSE_BASE_URL|TELEGRAM_BOT_TOKEN)=.' .env > /tmp/querymesh-secret.env
+```
+Step 3. Check which keys were taken (the values are not printed):
+```
+cut -d= -f1 /tmp/querymesh-secret.env
+```
+You should see: at least JINA_API_KEY, LLM_API_KEY, REDIS_URL, JWT_SECRET, API_PASSWORD (one per line).
+Step 4. Turn the lines into one JSON object:
+```
+jq -R -s 'split("\n") | map(select(length > 0) | capture("^(?<key>[^=]+)=(?<value>.*)$")) | from_entries' /tmp/querymesh-secret.env > /tmp/querymesh-secret.json
+```
+Step 5. Check that the JSON is valid (prints the key names again):
+```
+jq -r 'keys[]' /tmp/querymesh-secret.json
+```
+§ Piece § What it does
+§ `grep -E '^(A|B|C)=.'` § keep only lines that start with one of these names and have at least one character after the = sign
+§ `jq -R -s` § read the whole file as one raw text (not as JSON)
+§ `split(...)` § cut the text into lines at every line break
+§ `capture("^(?<key>[^=]+)=(?<value>.*)$")` § split each line at the FIRST = sign into {"key": ..., "value": ...}
+§ `from_entries` § turn the list of key/value pairs into one JSON object {"JINA_API_KEY": "...", ...}
+§ `file:///tmp/...` (next table) § the AWS CLI reads the value from this file, so it never appears in your shell history
+Step 6. Do the rows of your column:
+!blue
+§ Step § FakeCloud (free practice) § Real AWS (same step)
+§ 1 Create the secret § `aws secretsmanager create-secret --name querymesh/app --secret-string file:///tmp/querymesh-secret.json` § same (costs US$0.40 per month [41])
+§ 2 Read it back (only the key names) § `aws secretsmanager get-secret-value --secret-id querymesh/app --query SecretString --output text | jq -r 'keys[]'` § same; or console: Secrets Manager > Secrets > querymesh/app > Retrieve secret value
+§ 3 Delete the JSON file from disk § `rm /tmp/querymesh-secret.json` (keep /tmp/querymesh-secret.env until Section 6B.9) § `rm /tmp/querymesh-secret.json /tmp/querymesh-secret.env`
+§ You should see § row 2 lists the same keys as Step 3 § the same, plus an ARN like arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:querymesh/app-AbC123 at row 1
+§ 4 Later, to change a value § edit .env, repeat Steps 2 and 4, then `aws secretsmanager put-secret-value --secret-id querymesh/app --secret-string file:///tmp/querymesh-secret.json` § same; ESO copies the new value into the cluster within 1 hour (refreshInterval)
+Watch out: REDIS_URL must be your Upstash rediss:// URL (Section 5.8). A redis://localhost URL works on the VM but not inside the cluster.
+CHECKPOINT: row 2 of the table prints the key names in your column.
+If not: `ResourceExistsException` = the secret already exists: use row 4 (put-secret-value) instead of row 1.
+## SECTION 6B.7 - Create the Kubernetes cluster in the cloud
+WHERE: VS Code, project ~/querymesh, same terminal as Section 6B.5 (ACCOUNT_ID set)
+GOAL: white column: you practise the EKS API calls on FakeCloud (it stores the cluster, but has no real Kubernetes, so kind from Section 6B.4 is your real cluster) [8]. Light blue column: eksctl builds a real EKS cluster with 2 worker machines (15 to 25 minutes).
+Step 1. Create the file deploy/aws/secrets-read-policy.json (Section 2B.3 procedure) and paste:
+@code deploy/aws/secrets-read-policy.json
+§ Line(s) § What it does (plain English)
+§ `"Version": "2012-10-17"` § the IAM policy language version (always this date)
+§ `"Effect": "Allow"` § this statement gives permission
+§ `"Action": [ "secretsmanager:GetSecretValue", ... ]` § read a secret's value and its description, policy and versions: exactly what ESO needs, nothing more (no write, no delete)
+§ `"Resource": "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:querymesh/*"` § only secrets whose name starts with querymesh/ in your account. The * also covers the random 6-letter ending AWS adds to every secret ARN. ACCOUNT_ID is replaced by row 2 below
+Step 2. Create the file deploy/aws/eksctl-cluster.yaml and paste:
+@code deploy/aws/eksctl-cluster.yaml
+§ Line(s) § What it does (plain English)
+§ `apiVersion: eksctl.io/v1alpha5` and `kind: ClusterConfig` § this is an eksctl cluster description
+§ `metadata: name: querymesh, region: us-east-1, version: "1.35"` § cluster name, AWS region and Kubernetes version (1.35 is in standard support) (verify the list with `aws eks describe-cluster-versions`)
+§ `vpc: nat: gateway: Single` § eksctl creates a new network (VPC) with public and private subnets and ONE NAT gateway, the door through which the private machines reach the internet (US$0.045/h). All outgoing traffic of the pods leaves through this one address
+§ `iam: withOIDC: true` § creates the OIDC identity provider of the cluster (needed by some add-ons)
+§ `podIdentityAssociations:` § links Kubernetes service accounts to IAM roles (Pod Identity); eksctl creates the roles
+§ `namespace: kube-system`, `serviceAccountName: aws-load-balancer-controller`, `wellKnownPolicies: awsLoadBalancerController: true` § the load balancer controller (Section 6B.10) gets the official IAM permissions to create ALBs
+§ `namespace: external-secrets`, `serviceAccountName: external-secrets`, `permissionPolicyARNs: [...QueryMeshSecretsRead]` § ESO (Section 6B.9) gets ONLY the read policy of Step 1
+§ `addons: eks-pod-identity-agent, vpc-cni, coredns, kube-proxy` § the Pod Identity agent (required for the associations above), pod networking, DNS names inside the cluster, and Service routing
+§ `managedNodeGroups: name: ng-general, instanceType: t3.large` § the worker machines: t3.large = 2 vCPU, 8 GB RAM, US$0.0832/h each [41]
+§ `minSize: 2, desiredCapacity: 2, maxSize: 3` § start 2 machines; AWS may scale between 2 and 3
+§ `volumeSize: 30` § 30 GB disk per machine (images are large)
+§ `privateNetworking: true` § the machines get no public IP: they sit in private subnets, reachable only through the ALB
+Step 3. Do the rows of your column:
+!blue
+§ Step § FakeCloud (free practice) § Real AWS (same step)
+§ 1 Target and account § `source scripts/use_fakecloud.sh && export ACCOUNT_ID=123456789012` § `source scripts/use_aws.sh && export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)`
+§ 2 Fill in your account ID § `sed "s/ACCOUNT_ID/$ACCOUNT_ID/g" deploy/aws/secrets-read-policy.json > /tmp/secrets-read-policy.json` § same
+§ 3 Create the read-only secrets policy § `aws iam create-policy --policy-name QueryMeshSecretsRead --policy-document file:///tmp/secrets-read-policy.json` § same
+§ 4 Network (eksctl does this for you on AWS) § `export VPC_ID=$(aws ec2 create-vpc --cidr-block 10.0.0.0/16 --query Vpc.VpcId --output text) && echo $VPC_ID` § not needed (eksctl creates the VPC in row 8)
+§ 5 Two subnets in two zones § `export S1=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block 10.0.1.0/24 --availability-zone us-east-1a --query Subnet.SubnetId --output text)` then `export S2=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block 10.0.2.0/24 --availability-zone us-east-1b --query Subnet.SubnetId --output text)` § not needed (eksctl)
+§ 6 Role the EKS control plane uses § `aws iam create-role --role-name querymesh-eks-cluster --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"eks.amazonaws.com"},"Action":"sts:AssumeRole"}]}'` § not needed (eksctl)
+§ 7 Fill in the account ID in the cluster file § `sed "s/ACCOUNT_ID/$ACCOUNT_ID/g" deploy/aws/eksctl-cluster.yaml > /tmp/eksctl-cluster.yaml` § same
+§ 8 Create the cluster § `aws eks create-cluster --name querymesh --role-arn arn:aws:iam::$ACCOUNT_ID:role/querymesh-eks-cluster --resources-vpc-config subnetIds=$S1,$S2` § `eksctl create cluster -f /tmp/eksctl-cluster.yaml` (15-25 minutes; BILLING STARTS: control plane US$0.10/h + 2 machines + NAT)
+§ 9 Check the status § `aws eks describe-cluster --name querymesh --query cluster.status` § same
+§ You should see § "CREATING" first, then "ACTIVE". FakeCloud only stores this record: there is NO Kubernetes behind it [8] § eksctl prints `EKS cluster "querymesh" in "us-east-1" region is ready`; status "ACTIVE"
+§ 10 Point kubectl at the cluster § `kubectl config use-context kind-querymesh` (kind is your real cluster on FakeCloud days) § eksctl already did it; check with `kubectl config current-context` (shows ...@querymesh.us-east-1.eksctl.io)
+§ 11 See the machines § `kubectl get nodes` (2 kind nodes) § `kubectl get nodes` (2 nodes ip-192-168-...ec2.internal, Ready)
+§ 12 Remember the network ID (used in 6B.10 and 6B.12) § already in $VPC_ID § `export VPC_ID=$(aws eks describe-cluster --name querymesh --query cluster.resourcesVpcConfig.vpcId --output text) && echo $VPC_ID`
+§ Placeholder § Replace with § Example
+§ ACCOUNT_ID (in the two files) § your 12-digit AWS account ID; rows 2 and 7 replace it automatically with sed § 123456789012 (FakeCloud), 4815162342xx (yours)
+Watch out: eksctl prints a lot and takes long; do not press Ctrl+C. If your laptop sleeps, the SSH session (not the VM) may drop: run row 8 inside tmux (`tmux new -s eks`) so it survives.
+Watch out: eksctl creates CloudFormation stacks named eksctl-querymesh-cluster and eksctl-querymesh-nodegroup-ng-general. Always delete with eksctl (Section 6B.15), never by hand in the console.
+CHECKPOINT: row 9 says ACTIVE and row 11 shows 2 Ready nodes in your column.
+If not: AWS column: open CloudFormation in the console, click the stack in ROLLBACK, tab Events, read the first red reason (often a missing permission of your IAM user or a quota).
+## SECTION 6B.8 - Put OpenSearch on the cluster
+WHERE: VS Code Terminal, kubectl pointing at the cluster of your column (`kubectl config current-context`)
+GOAL: one OpenSearch node inside the cluster, reachable by the pods as http://opensearch-cluster-master:9200.
+Step 1. Create the file deploy/k8s/opensearch-values.yaml and paste:
+@code deploy/k8s/opensearch-values.yaml
+§ Line(s) § What it does (plain English)
+§ `singleNode: true` § one OpenSearch machine instead of the chart's default of three (enough for learning)
+§ `protocol: http` § plain HTTP inside the cluster (the security plugin is off, see below)
+§ `opensearchJavaOpts: "-Xms1g -Xmx1g"` § give OpenSearch 1 GB of Java memory (fits on a t3.large)
+§ `resources: requests: {cpu: 500m, memory: 2Gi}` § Kubernetes reserves half a CPU and 2 GB RAM for it
+§ `persistence: enabled: false` § no disk volume: data is lost when the pod restarts. The ingestion CronJob refills it. For real production use a volume or Amazon OpenSearch Service (Part 7)
+§ `sysctlInit: enabled: true` § a small start-up container sets vm.max_map_count=262144 on the machine, which OpenSearch requires
+§ `DISABLE_INSTALL_DEMO_CONFIG` and `DISABLE_SECURITY_PLUGIN` = "true" § no demo certificates and no login. Acceptable only because OpenSearch has no Ingress: nothing outside the cluster can reach it
+§ `config: opensearch.yml: ...` § the OpenSearch settings file: cluster name, listen on all addresses, security plugin disabled
+Step 2. Do the rows of your column:
+!blue
+§ Step § FakeCloud (free practice) § Real AWS (same step)
+§ 1 Namespace (a folder for our objects) § `kubectl create namespace querymesh` § same
+§ 2 Add the OpenSearch chart repository § `helm repo add opensearch https://opensearch-project.github.io/helm-charts/` § same
+§ 3 Download its chart list § `helm repo update` § same
+§ 4 Install OpenSearch 3.9.0 § `helm install opensearch opensearch/opensearch --version 3.9.0 -n querymesh -f deploy/k8s/opensearch-values.yaml` § same
+§ 5 Wait until it is ready (1-3 minutes) § `kubectl -n querymesh rollout status statefulset/opensearch-cluster-master --timeout=600s` § same
+§ 6 Test it from inside the cluster § `kubectl -n querymesh run curl-test --rm -it --restart=Never --image=curlimages/curl -- curl -s http://opensearch-cluster-master:9200` § same
+§ You should see § `partitioned roll out complete` at row 5 and JSON with "number" : "3.9.0" at row 6 § the same
+Watch out: if row 5 times out, run `kubectl -n querymesh describe pod opensearch-cluster-master-0` and read Events at the bottom: "Insufficient memory" means the machines are too small or busy.
+CHECKPOINT: row 6 prints the OpenSearch version JSON.
+If not: `kubectl -n querymesh logs opensearch-cluster-master-0 --tail 30` shows why OpenSearch stopped (most often vm.max_map_count: check that sysctlInit is enabled in the values file).
+## SECTION 6B.9 - Get the secrets into the cluster
+WHERE: VS Code Terminal, project ~/querymesh
+GOAL: a Kubernetes Secret called querymesh-secrets in namespace querymesh. White column: you copy it from FakeCloud's Secrets Manager by hand. Light blue column: the External Secrets Operator copies it from AWS Secrets Manager automatically and keeps it up to date [39].
+Step 1. Create the file deploy/k8s/cluster-secret-store.yaml and paste:
+@code deploy/k8s/cluster-secret-store.yaml
+§ Line(s) § What it does (plain English)
+§ `apiVersion: external-secrets.io/v1` and `kind: ClusterSecretStore` § an ESO object (API version v1; older v1beta1 files are rejected by ESO 2.x) that every namespace may use
+§ `name: aws-secretsmanager` § the name the chart's ExternalSecret refers to (values.yaml: externalSecrets.storeName)
+§ `provider: aws: service: SecretsManager, region: us-east-1` § read from AWS Secrets Manager in us-east-1
+§ (no auth block) § ESO uses its own service account's IAM role through Pod Identity, created by eksctl in Section 6B.7
+Step 2. Do the rows of your column:
+!blue
+§ Step § FakeCloud (free practice) § Real AWS (same step)
+§ 1 Target § `source scripts/use_fakecloud.sh && kubectl config use-context kind-querymesh` § `source scripts/use_aws.sh` and check `kubectl config current-context` shows the EKS cluster
+§ 2 Read the secret from Secrets Manager into KEY=value lines § `aws secretsmanager get-secret-value --secret-id querymesh/app --query SecretString --output text | jq -r 'to_entries[] | "\(.key)=\(.value)"' > /tmp/from-secrets-manager.env` § not needed: ESO does this inside the cluster
+§ 3 Create the Kubernetes Secret § `kubectl -n querymesh create secret generic querymesh-secrets --from-env-file=/tmp/from-secrets-manager.env` § not needed: the chart's ExternalSecret (Section 6B.11) makes ESO create it
+§ 4 Remove the file with the values § `rm /tmp/from-secrets-manager.env /tmp/querymesh-secret.env` § nothing to remove
+§ 5 Add the ESO chart repository § not needed on kind § `helm repo add external-secrets https://charts.external-secrets.io && helm repo update`
+§ 6 Install ESO 2.13.0 § not needed on kind § `helm install external-secrets external-secrets/external-secrets -n external-secrets --create-namespace --version 2.13.0`
+§ 7 Wait for ESO § not needed on kind § `kubectl -n external-secrets rollout status deployment/external-secrets --timeout=300s`
+§ 8 Tell ESO where the secrets live § not needed on kind § `kubectl apply -f deploy/k8s/cluster-secret-store.yaml`
+§ 9 Check the connection § `kubectl -n querymesh get secret querymesh-secrets -o jsonpath='{.data}' | jq -r 'keys[]'` (lists the key names) § `kubectl get clustersecretstore aws-secretsmanager` (STATUS Valid, READY True)
+§ Piece § What it does
+§ `jq -r 'to_entries[] | "\(.key)=\(.value)"'` § turns the JSON object back into KEY=value lines
+§ `--from-env-file` § one Secret entry per line of the file
+§ ExternalSecret (in the chart, created in Section 6B.12) § "copy every key of querymesh/app into the Secret querymesh-secrets, check again every hour"
+Watch out: on kind you must repeat rows 2-4 whenever you change the secret (delete the old one first with `kubectl -n querymesh delete secret querymesh-secrets`). On EKS, ESO does this by itself within the refreshInterval (1 hour).
+Watch out: (light blue column) if the store shows `InvalidProviderConfig` or AccessDenied, the Pod Identity association is missing: run `eksctl get podidentityassociation --cluster querymesh` and check there is a line for external-secrets/external-secrets (verify the exact command output format).
+CHECKPOINT: white: row 9 lists the key names. Light blue: row 9 shows Valid / True.
+If not: white: `NotFound` on the namespace = do Section 6B.8 row 1 first.
+## SECTION 6B.10 - The web entrance (load balancer)
+WHERE: VS Code Terminal
+GOAL: white column: you reach the app with kubectl port-forward (no load balancer needed on kind). Light blue column: the AWS Load Balancer Controller runs in the cluster and will create a real ALB for the chart's Ingress [38].
+Step 1. Do the rows of your column:
+!blue
+§ Step § FakeCloud (free practice) § Real AWS (same step)
+§ 1 Add the chart repository § not needed on kind § `helm repo add eks https://aws.github.io/eks-charts && helm repo update`
+§ 2 Install the controller § not needed on kind § `helm install aws-load-balancer-controller eks/aws-load-balancer-controller -n kube-system --set clusterName=querymesh --set region=us-east-1 --set vpcId=$VPC_ID`
+§ 3 Wait for it § not needed on kind § `kubectl -n kube-system rollout status deployment/aws-load-balancer-controller --timeout=300s`
+§ 4 Check the ALB class exists § `kubectl get ingressclass` (no output on kind is fine) § `kubectl get ingressclass` shows alb
+§ 5 How you will reach the app § `kubectl -n querymesh port-forward svc/querymesh-api 8090:80` (Section 6B.13) § the ALB address from the Ingress (Section 6B.13)
+§ You should see § nothing to see yet § `deployment "aws-load-balancer-controller" successfully rolled out`
+Watch out: (light blue column) $VPC_ID comes from Section 6B.7 row 12. If it is empty, run that row again first. Without the right VPC ID the controller cannot create the ALB.
+CHECKPOINT: light blue: `kubectl get ingressclass` lists alb. White: nothing to check.
+If not: `kubectl -n kube-system logs deployment/aws-load-balancer-controller --tail 30` names the missing permission (Pod Identity association from Section 6B.7).
+## SECTION 6B.11 - Create the Helm chart (all files explained)
+WHERE: VS Code Explorer, folder ~/querymesh/deploy/helm/querymesh
+GOAL: one chart that deploys the five agents, the API (2 copies), Gradio, optional Telegram, the nightly ingestion CronJob, the Ingress and the ExternalSecret, on kind and on EKS.
+How a chart works: Helm reads values.yaml (and any extra values file you give with -f, and any --set), puts the values into the templates (the {{ ... }} parts) and sends the finished YAML to Kubernetes. One chart, two value files: values-kind.yaml and values-eks.yaml change only what differs.
+Step 1. Create the file deploy/helm/querymesh/Chart.yaml and paste:
+@code deploy/helm/querymesh/Chart.yaml
+§ Line § What it does (plain English)
+§ `apiVersion: v2` § Helm 3/4 chart format
+§ `name: querymesh` and `description:` § the chart's name and one-line description
+§ `type: application` § this chart installs an app (not a library of helpers)
+§ `version: 1.0.0` § the version of the chart itself (raise it when you change templates)
+§ `appVersion: "1.0.0"` § the version of QueryMesh it installs (informational)
+Step 2. Create the file deploy/helm/querymesh/values.yaml and paste:
+@code deploy/helm/querymesh/values.yaml
+§ Line(s) § What it does (plain English)
+§ `image: repository: querymesh, tag: v1, pullPolicy: IfNotPresent` § which image the agents, API and UIs use; IfNotPresent = use the copy already on the machine (needed on kind, where images come from kind load)
+§ `ingestImage:` § the bigger image with Docling, used only by the CronJob
+§ `env:` block § every non-secret setting; the ConfigMap template turns each line into an environment variable
+§ `OPENSEARCH_URL: http://opensearch-cluster-master:9200` § the Service name the OpenSearch chart created in Section 6B.8
+§ `LLM_BASE_URL: http://CHANGE-ME:8000/v1` § a deliberate placeholder: values-kind.yaml or --set replaces it
+§ `WORKER_MODE: remote` § the supervisor calls the agents over MCP/SSE
+§ `PAPERS_BUCKET: ""` § no S3 upload from the cluster (the VM keeps the PDFs)
+§ `secretName: querymesh-secrets` § the Secret every pod reads (made in Section 6B.9)
+§ `externalSecrets: enabled: false, storeName, remoteKey: querymesh/app` § on kind no ESO; values-eks.yaml switches it on
+§ `agents:` list § name and port of the five agents; the templates loop over this list
+§ `api: replicas: 2, port: 8090` § two copies of the API: one can crash or be updated while the other answers
+§ `gradio: enabled: true`, `telegram: enabled: false` § which UIs to deploy
+§ `ingest: schedule: "0 2 * * *", query, maxPapers: 10` § the CronJob runs every night at 02:00 UTC (the same job as the Airflow DAG of Section 4.8)
+§ `resources: requests: {cpu: 100m, memory: 256Mi}, limits: {memory: 1Gi}` § each app pod reserves a tenth of a CPU and 256 MB, and is stopped if it uses more than 1 GB
+§ `ingress: enabled: false, className: alb` § no Ingress by default; values-eks.yaml switches it on
+§ `alb.ingress.kubernetes.io/scheme: internet-facing` § the ALB gets a public address
+§ `alb.ingress.kubernetes.io/target-type: ip` § the ALB sends traffic straight to pod IPs
+§ `alb.ingress.kubernetes.io/healthcheck-path: /healthz` § the ALB checks /healthz to know a pod is alive
+§ `alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=300` § keep quiet connections open 5 minutes, so the streaming /ask/stream answer is not cut after the default 60 seconds
+Step 3. Create the file deploy/helm/querymesh/values-kind.yaml and paste:
+@code deploy/helm/querymesh/values-kind.yaml
+§ Line § What it does (plain English)
+§ `LLM_BASE_URL: http://172.17.0.1:8000/v1` § from inside kind, the VM is 172.17.0.1 (Section 6B.4 Step 6), where vLLM listens on port 8000
+§ `ingress: enabled: false` § on kind we use port-forward, not a load balancer
+Step 4. Create the file deploy/helm/querymesh/values-eks.yaml and paste:
+@code deploy/helm/querymesh/values-eks.yaml
+§ Line § What it does (plain English)
+§ the comment § the ECR image addresses and the Hyperstack vLLM address are given with --set at install time (Section 6B.12)
+§ `image: pullPolicy: Always` § EKS machines always check ECR for the newest copy of the tag
+§ `externalSecrets: enabled: true` § create the ExternalSecret, so ESO fills querymesh-secrets
+§ `ingress: enabled: true` § create the Ingress, so the controller builds an ALB
+Step 5. Create the file deploy/helm/querymesh/templates/configmap.yaml and paste:
+@code deploy/helm/querymesh/templates/configmap.yaml
+§ Line(s) § What it does (plain English)
+§ `kind: ConfigMap`, `name: querymesh-config` § a Kubernetes object that holds plain settings
+§ `{{- range $key, $value := .Values.env }}` ... `{{- end }}` § repeat for every line of the env block in values.yaml
+§ `{{ $key }}: {{ $value | quote }}` § write KEY: "value" (quote = put the value in double quotes, so "1024" stays text)
+§ `AGENT_URLS: "{{- range $i, $a := .Values.agents }}{{ if $i }},{{ end }}http://querymesh-{{ $a.name }}:{{ $a.port }}{{- end }}"` § build the comma-separated list of the five agent addresses from the agents list (a comma before every item except the first)
+§ `API_URL: "http://querymesh-api:80"` § the UIs reach the API through its Service on port 80
+Step 6. Create the file deploy/helm/querymesh/templates/agents.yaml and paste:
+@code deploy/helm/querymesh/templates/agents.yaml
+§ Line(s) § What it does (plain English)
+§ `{{- range .Values.agents }}` § repeat everything below once per agent (inside the loop, `.name` and `.port` are the current agent's values)
+§ `---` § separates two YAML documents in one file
+§ `kind: Deployment`, `name: querymesh-{{ .name }}` § keep one pod of this agent running, e.g. querymesh-retriever
+§ `labels: {app: querymesh-{{ .name }}}` and `selector: matchLabels:` § a name tag on the pods; the Deployment and the Service find their pods by this tag
+§ `image: "{{ $.Values.image.repository }}:{{ $.Values.image.tag }}"` § `$` means "the top of the values" (inside a range, `.` is the agent, so we need `$` to reach image)
+§ `command: ["python", "-m", "querymesh.agents", "{{ .name }}"]` § start this agent's server (Section 6A.2)
+§ `containerPort: {{ .port }}` § the port the agent listens on
+§ `PUBLIC_URL: "http://querymesh-{{ .name }}:{{ .port }}"` § the address written into the Agent Card, so peers can reach it (Section 6A.2)
+§ `envFrom: configMapRef` then `secretRef` § all ConfigMap keys and all Secret keys become environment variables (if a key is in both, the Secret wins because it comes last)
+§ `readinessProbe: httpGet: {path: /healthz, ...}` § Kubernetes sends traffic only after /healthz answers
+§ `resources: {{- toYaml $.Values.resources | nindent 12 }}` § copy the resources block from values.yaml, indented 12 spaces
+§ `kind: Service`, `ports: port/targetPort {{ .port }}` § a stable name querymesh-retriever:8101 in front of the pod
+§ `{{- end }}` § end of the loop
+Step 7. Create the file deploy/helm/querymesh/templates/api.yaml and paste:
+@code deploy/helm/querymesh/templates/api.yaml
+§ Line(s) § What it does (plain English)
+§ Deployment `querymesh-api`, `replicas: {{ .Values.api.replicas }}` § run 2 API pods
+§ (no command line) § the image's default command starts uvicorn on 8090 (Dockerfile CMD)
+§ `readinessProbe` and `livenessProbe` on /healthz § ready = may receive traffic; liveness = if /healthz stops answering, Kubernetes restarts the pod (first check after 20 seconds)
+§ Service `querymesh-api`, `port: 80`, `targetPort: {{ .Values.api.port }}` § other pods and the Ingress call querymesh-api:80; it forwards to 8090 in the pod
+§ `{{- if .Values.gradio.enabled }}` ... `{{- end }}` § the Gradio part exists only if gradio.enabled is true
+§ Deployment `querymesh-gradio`, `command: ["python", "-m", "querymesh.ui_gradio"]` § the web UI pod on port 7860
+§ Service `querymesh-gradio` with annotation `alb.ingress.kubernetes.io/healthcheck-path: /` § the ALB health check for Gradio uses / (Gradio has no /healthz page; this annotation on the Service overrides the Ingress default)
+§ `{{- if .Values.telegram.enabled }}` block § the bot pod, only if telegram.enabled is true. It needs no Service: it calls Telegram, nobody calls it
+Step 8. Create the file deploy/helm/querymesh/templates/ingest-cronjob.yaml and paste:
+@code deploy/helm/querymesh/templates/ingest-cronjob.yaml
+§ Line(s) § What it does (plain English)
+§ `kind: CronJob`, `schedule: {{ .Values.ingest.schedule | quote }}` § start a job on this cron schedule (02:00 UTC every day)
+§ `concurrencyPolicy: Forbid` § never start a second run while the previous one still runs
+§ `backoffLimit: 2` § retry a failed run at most 2 times
+§ `restartPolicy: Never` § a finished ingestion pod is not restarted
+§ `image: "{{ .Values.ingestImage.repository }}:{{ .Values.ingestImage.tag }}"` § the image with Docling
+§ `command: [... "--query", {{ .Values.ingest.query | quote }}, "--max-papers", {{ .Values.ingest.maxPapers | quote }}]` § run `python -m querymesh.ingest` with the query and number from values.yaml (quoted so the command stays text)
+§ `resources: requests: {cpu: 500m, memory: 2Gi}, limits: {memory: 6Gi}` § Docling needs more memory than the app pods
+Step 9. Create the file deploy/helm/querymesh/templates/ingress.yaml and paste:
+@code deploy/helm/querymesh/templates/ingress.yaml
+§ Line(s) § What it does (plain English)
+§ `{{- if .Values.ingress.enabled }}` § only on EKS (values-eks.yaml)
+§ `annotations: {{- toYaml .Values.ingress.annotations | nindent 4 }}` § copy the four alb.* annotations from values.yaml
+§ `ingressClassName: {{ .Values.ingress.className }}` § "alb": handled by the AWS Load Balancer Controller
+§ paths `/token`, `/ask`, `/healthz` to `querymesh-api` port 80 § API calls go to the API (/ask also covers /ask/stream)
+§ path `/` to `querymesh-gradio` port 80 § everything else (the chat page and its files) goes to Gradio. The longest matching path wins, so /ask never reaches Gradio
+Step 10. Create the file deploy/helm/querymesh/templates/externalsecret.yaml and paste:
+@code deploy/helm/querymesh/templates/externalsecret.yaml
+§ Line(s) § What it does (plain English)
+§ `{{- if .Values.externalSecrets.enabled }}` § only on EKS
+§ `kind: ExternalSecret` (`external-secrets.io/v1`) § an order to ESO
+§ `refreshInterval: 1h` § ESO re-reads AWS Secrets Manager every hour
+§ `secretStoreRef: name: aws-secretsmanager, kind: ClusterSecretStore` § use the store from Section 6B.9
+§ `target: name: querymesh-secrets, creationPolicy: Owner` § ESO creates (and owns) the Kubernetes Secret querymesh-secrets
+§ `dataFrom: - extract: key: querymesh/app` § take every key of the JSON secret querymesh/app (Section 6B.6) as a separate Secret entry
+Step 11. Check the chart for mistakes:
+```
+helm lint deploy/helm/querymesh
+```
+You should see: `1 chart(s) linted, 0 chart(s) failed` (an INFO line about a missing icon is fine).
+Step 12. See the YAML Helm would send (kind values), without installing:
+```
+helm template querymesh deploy/helm/querymesh -f deploy/helm/querymesh/values-kind.yaml | grep "^kind:" | sort | uniq -c
+```
+You should see: 1 ConfigMap, 1 CronJob, 7 Deployment, 7 Service (5 agents + API + Gradio). With values-eks.yaml you also get 1 Ingress and 1 ExternalSecret: 18 objects, exactly what Helm produced when we rendered the chart while writing this manual.
+Watch out: YAML cares about spaces. Never use the Tab key in these files; VS Code inserts spaces when the file ends with .yaml. A wrong indent gives errors like "mapping values are not allowed here" with a line number.
+CHECKPOINT: helm lint reports 0 failed.
+If not: the error names the template file and line; compare it character by character with the grey box.
+## SECTION 6B.12 - Install QueryMesh with Helm
+WHERE: VS Code Terminal, project ~/querymesh, kubectl pointing at the cluster of your column
+GOAL: all QueryMesh pods run in namespace querymesh.
+Light blue column first: the EKS pods must reach vLLM on your Hyperstack VM. Hyperstack blocks every port except 22 by default [5], so you open port 8000 ONLY for the EKS NAT gateway address (all EKS pods leave the VPC through it).
+Step 1. Do the rows of your column:
+!blue
+§ Step § FakeCloud (free practice) § Real AWS (same step)
+§ 1 Which cluster? § `kubectl config current-context` shows kind-querymesh § shows the EKS cluster (...querymesh.us-east-1.eksctl.io)
+§ 2 Find the outgoing address of the cluster § not needed (kind runs on the VM) § `export NAT_IP=$(aws ec2 describe-nat-gateways --filter Name=vpc-id,Values=$VPC_ID --query 'NatGateways[0].NatGatewayAddresses[0].PublicIp' --output text) && echo $NAT_IP`
+§ 3 Open vLLM's port only for that address § not needed § Hyperstack console > Virtual Machines > querymesh-gpu > Firewall tab (or Firewalls in the left menu, then attach it to the VM) > add a rule: Direction Ingress, Protocol TCP, Port 8000, Remote IP NAT_IP/32 > save (verify the button names) [5]
+§ 4 Your VM's public IP (from Section 2A.8) § not needed § `export HYPERSTACK_IP=HYPERSTACK_PUBLIC_IP`
+§ 5 Registry address § not needed (images were loaded with kind load) § `export REGISTRY=$ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com`
+§ 6 Install the chart § `helm install querymesh deploy/helm/querymesh -n querymesh -f deploy/helm/querymesh/values-kind.yaml` § `helm install querymesh deploy/helm/querymesh -n querymesh -f deploy/helm/querymesh/values-eks.yaml --set image.repository=$REGISTRY/querymesh --set ingestImage.repository=$REGISTRY/querymesh-ingest --set env.LLM_BASE_URL=http://$HYPERSTACK_IP:8000/v1`
+§ 7 (Recommended) allow the ALB only from your own IP § not needed § find your laptop IP at https://checkip.amazonaws.com, then `helm upgrade querymesh deploy/helm/querymesh -n querymesh --reuse-values --set-string 'ingress.annotations.alb\.ingress\.kubernetes\.io/inbound-cidrs=MY_IP/32'`
+§ 8 Watch the pods start (Ctrl+C to stop watching) § `kubectl -n querymesh get pods -w` § same
+§ 9 Secret synced? § `kubectl -n querymesh get secret querymesh-secrets` (made by hand in 6B.9) § `kubectl -n querymesh get externalsecret querymesh-secrets` shows STATUS SecretSynced, READY True
+§ You should see § after 1-2 minutes: opensearch-cluster-master-0, querymesh-api (2 pods), querymesh-retriever, -grader, -writer, -critic, -scout, querymesh-gradio, all 1/1 Running § the same (the first start takes longer: the machines download the image from ECR)
+§ Placeholder § Replace with § Example
+§ NAT_IP § printed by row 2 § 3.215.40.12
+§ HYPERSTACK_PUBLIC_IP § the public IP of querymesh-gpu (Section 2A.8) § 38.80.123.45
+§ MY_IP § your laptop's public IP § 49.205.10.20
+§ If you see... § It means... § Do this next
+§ `ErrImageNeverPull` or `ImagePullBackOff` on kind § the image is not inside kind § Section 6B.5 row 12 (kind load), then `kubectl -n querymesh delete pod POD_NAME`
+§ `ImagePullBackOff` on EKS § wrong ECR address or the push failed § `kubectl -n querymesh describe pod POD_NAME` shows the address it tried; compare with Section 6B.5 row 11
+§ `CreateContainerConfigError` § the Secret querymesh-secrets does not exist yet § white: Section 6B.9 rows 2-3. Light blue: row 9 above, then `kubectl describe externalsecret -n querymesh querymesh-secrets`
+§ `CrashLoopBackOff` § the program starts and dies § `kubectl -n querymesh logs POD_NAME --previous` shows the Python error
+§ pods Running but 0/1 READY § /healthz does not answer yet § wait 30 seconds; then check the logs of that pod
+Watch out: `helm install` works once. For every later change use `helm upgrade querymesh deploy/helm/querymesh -n querymesh --reuse-values` plus the changed -f or --set.
+CHECKPOINT: `kubectl -n querymesh get pods` shows every pod 1/1 Running in your column.
+If not: use the table above, pod by pod.
+## SECTION 6B.13 - Test the deployment and run the first ingestion
+WHERE: VS Code Terminal, project ~/querymesh
+GOAL: papers are indexed inside the cluster's OpenSearch, and a question is answered through the cluster.
+Step 1. Do the rows of your column (the cluster's OpenSearch starts empty):
+!blue
+§ Step § FakeCloud (free practice) § Real AWS (same step)
+§ 1 Start the nightly job once, now § `kubectl -n querymesh create job first-ingest --from=cronjob/querymesh-ingest` § same
+§ 2 Follow its log (5-15 minutes: Docling downloads its models first) § `kubectl -n querymesh logs -f job/first-ingest` § same
+§ You should see § lines `indexed 2510.xxxxx: 37 chunks ...` and at the end `{'added': [...], 'skipped': []}` § the same
+§ 3 Make the API reachable § in a SECOND terminal: `kubectl -n querymesh port-forward svc/querymesh-api 8090:80` (leave it running) § `export APP_URL=http://$(kubectl -n querymesh get ingress querymesh -o jsonpath='{.status.loadBalancer.ingress[0].hostname}') && echo $APP_URL`
+§ 4 Base address for the tests § `export APP_URL=http://localhost:8090` § already set in row 3 (wait 2-3 minutes after install until the ALB is active)
+§ 5 Health § `curl -s $APP_URL/healthz` § same
+§ 6 Password § `API_PASSWORD=$(grep '^API_PASSWORD=' .env | cut -d= -f2)` § same
+§ 7 Log in § `TOKEN=$(curl -s -X POST $APP_URL/token -d "username=admin&password=$API_PASSWORD" | jq -r .access_token)` § same
+§ 8 Ask § `curl -s -X POST $APP_URL/ask -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"question": "What are recent methods to reduce hallucination in RAG?"}' | jq` § same
+§ 9 Web UI § `kubectl -n querymesh port-forward svc/querymesh-gradio 7860:80`, then VS Code PORTS tab > Forward a Port > 7860 > globe icon § open $APP_URL in your laptop's browser (the ALB address)
+§ 10 Which agents worked § `kubectl -n querymesh logs deployment/querymesh-retriever --tail 20` § same; and in Logfire (Section 6A.5) the trace shows every agent span
+§ You should see § {"status":"ok"} at row 5; a grounded answer with citations at row 8 § the same through the ALB; the ALB is listed in EC2 > Load Balancers
+Watch out: if row 8 waits and then returns an LLM error on EKS, the pods cannot reach vLLM: check the Hyperstack firewall rule (Section 6B.12 row 3) and test from inside the cluster: `kubectl -n querymesh run curl-test --rm -it --restart=Never --image=curlimages/curl -- curl -s -m 5 http://HYPERSTACK_PUBLIC_IP:8000/v1/models -H "Authorization: Bearer LLM_API_KEY_VALUE"`.
+Watch out: on kind, port 8090 is free only after `docker compose down` (Section 6B.2 Step 15).
+CHECKPOINT: row 8 returns an answer with citations from the cluster in your column.
+If not: `kubectl -n querymesh logs deployment/querymesh-api --tail 40` and the retriever log show which agent failed.
+## SECTION 6B.14 - CI/CD: GitHub Actions tests, builds, pushes and deploys
+WHERE: VS Code (files), GitHub website (settings), VS Code Terminal (IAM)
+GOAL: every push to GitHub runs the tests; every push to main also builds both images, pushes them to ECR and updates EKS, with no AWS key stored in GitHub [40].
+Step 1. Create the folders:
+```
+mkdir -p ~/querymesh/.github/workflows
+```
+Step 2. Create the file .github/workflows/ci.yml (Section 2B.3 procedure) and paste:
+@code .github/workflows/ci.yml
+§ Line(s) § What it does (plain English)
+§ `name: querymesh-ci` § the name shown in the Actions tab
+§ `on: push: branches: [main]` and `pull_request:` § run on every push to main and on every pull request
+§ `permissions: id-token: write` § allow the job to request a GitHub OIDC token (this replaces stored AWS keys)
+§ `contents: read` § the job may read the code, nothing more
+§ `env: AWS_REGION: us-east-1, CLUSTER: querymesh` § values used by the steps below
+§ `jobs: test: runs-on: ubuntu-latest` § job 1 runs on a fresh GitHub Linux machine
+§ `- uses: actions/checkout@v7` § download your repository into that machine
+§ `- uses: astral-sh/setup-uv@v7` § install uv
+§ `- run: uv venv -p 3.12 && uv pip install -e ".[dev]"` § create the environment and install QueryMesh with the test tools (no Docling: tests do not need it)
+§ `- run: uv run pytest -q` § run the 10 tests; a failure stops everything (no deploy of broken code)
+§ `build-and-deploy:` with `if: github.ref == 'refs/heads/main' && vars.AWS_ROLE_ARN != ''` § job 2 runs only on main AND only when you created the repository variable AWS_ROLE_ARN (so the pipeline stays green before you set up AWS)
+§ `needs: test` § job 2 waits for job 1 to pass
+§ `aws-actions/configure-aws-credentials@v6` with `role-to-assume: ${{ vars.AWS_ROLE_ARN }}` § trade the GitHub OIDC token for 1-hour AWS credentials of the deploy role
+§ `aws-actions/amazon-ecr-login@v2` with `id: ecr` § log Docker in to ECR; `steps.ecr.outputs.registry` is your registry address
+§ `docker/setup-buildx-action@v4` § the modern Docker builder
+§ `docker/build-push-action@v7` with `target: app` / `target: ingest` § build each stage of the Dockerfile and push it
+§ `tags: .../querymesh:${{ github.sha }}` § the tag is the Git commit ID, so every deploy is traceable to one commit
+§ `aws eks update-kubeconfig --name "$CLUSTER"` § give kubectl access to the EKS cluster
+§ `helm upgrade --install ... --reuse-values --set image.tag=${{ github.sha }} ...` § update the release, keep all earlier values (LLM_BASE_URL, inbound-cidrs) and change only the image addresses and tags
+§ `kubectl -n querymesh rollout status deployment/querymesh-api --timeout=300s` § wait until the new API pods are ready; if they never become ready, the job fails and you see it in red
+Step 3. Create the file deploy/aws/github-oidc-trust.json and paste:
+@code deploy/aws/github-oidc-trust.json
+§ Line(s) § What it does (plain English)
+§ `"Principal": {"Federated": "arn:aws:iam::ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com"}` § WHO may use the role: someone who logs in through GitHub's OIDC provider
+§ `"Action": "sts:AssumeRoleWithWebIdentity"` § the login is done with a web token (the OIDC token)
+§ `"token.actions.githubusercontent.com:aud": "sts.amazonaws.com"` § the token must be meant for AWS STS
+§ `"token.actions.githubusercontent.com:sub": "repo:GITHUB_USER/querymesh:*"` § and must come from YOUR repository querymesh (any branch). Tighter: `repo:GITHUB_USER/querymesh:ref:refs/heads/main`
+Step 4. Create the file deploy/aws/github-deploy-policy.json and paste:
+@code deploy/aws/github-deploy-policy.json
+§ Line(s) § What it does (plain English)
+§ `"Action": "ecr:GetAuthorizationToken", "Resource": "*"` § get the ECR login (this action has no specific resource)
+§ the second statement with `ecr:BatchCheckLayerAvailability` ... `ecr:GetDownloadUrlForLayer` § upload (push) and read image layers, only in the two QueryMesh repositories
+§ `"Action": "eks:DescribeCluster"` on the querymesh cluster § needed by `aws eks update-kubeconfig`. What the role may do INSIDE Kubernetes is decided by the access entry (row 7 below)
+Step 5. Do the rows of your column (white = practise the IAM calls on FakeCloud; GitHub itself can only reach real AWS):
+!blue
+§ Step § FakeCloud (free practice) § Real AWS (same step)
+§ 1 Target and account § `source scripts/use_fakecloud.sh && export ACCOUNT_ID=123456789012` § `source scripts/use_aws.sh && export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)`
+§ 2 Trust GitHub's login service § `aws iam create-open-id-connect-provider --url https://token.actions.githubusercontent.com --client-id-list sts.amazonaws.com` § same (no thumbprint needed any more [40])
+§ 3 Fill in account and GitHub user § `sed -e "s/ACCOUNT_ID/$ACCOUNT_ID/g" -e "s/GITHUB_USER/YOUR_GITHUB_USER/g" deploy/aws/github-oidc-trust.json > /tmp/gh-trust.json` § same
+§ 4 Create the deploy role § `aws iam create-role --role-name querymesh-github-deploy --assume-role-policy-document file:///tmp/gh-trust.json` § same
+§ 5 Fill in the account in the permissions § `sed "s/ACCOUNT_ID/$ACCOUNT_ID/g" deploy/aws/github-deploy-policy.json > /tmp/gh-policy.json` § same
+§ 6 Attach the permissions § `aws iam put-role-policy --role-name querymesh-github-deploy --policy-name querymesh-deploy --policy-document file:///tmp/gh-policy.json` § same
+§ 7 Let the role into the cluster § `aws eks create-access-entry --cluster-name querymesh --principal-arn arn:aws:iam::$ACCOUNT_ID:role/querymesh-github-deploy` (FakeCloud stores it) § same (verify)
+§ 8 Give it admin rights in the cluster § `aws eks associate-access-policy --cluster-name querymesh --principal-arn arn:aws:iam::$ACCOUNT_ID:role/querymesh-github-deploy --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy --access-scope type=cluster` § same (verify; tighter: type=namespace,namespaces=querymesh with AmazonEKSEditPolicy)
+§ 9 Check § `aws iam get-role --role-name querymesh-github-deploy --query Role.Arn --output text` § same; copy the printed ARN
+§ 10 Tell GitHub the role § not possible (GitHub cannot reach FakeCloud on your VM) § github.com > your repository querymesh > Settings > Secrets and variables > Actions > Variables tab > New repository variable > Name `AWS_ROLE_ARN`, Value the ARN from row 9 > Add variable
+§ Placeholder § Replace with § Example
+§ YOUR_GITHUB_USER § your GitHub user or organisation name, exactly as in the repository URL § karthik-k
+Step 6. Commit the new files:
+```
+git add Dockerfile .dockerignore docker-compose.yml deploy .github && git commit -m "Add Docker, Helm chart and CI/CD"
+```
+Step 7. Push to GitHub:
+```
+git push origin main
+```
+Step 8. Open github.com > your repository querymesh > Actions tab > the newest run of querymesh-ci.
+You should see: job test with a green tick (10 passed). Job build-and-deploy runs only after row 10 exists, and then also turns green after about 10 minutes (building the ingest image is the slow part).
+Step 9. Check that EKS now runs the image of your commit:
+```
+kubectl -n querymesh get deployment querymesh-api -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
+```
+You should see: ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/querymesh: followed by the 40-character commit ID shown in the Actions run.
+§ If you see... § It means... § Do this next
+§ `Could not assume role with OIDC: Not authorized to perform sts:AssumeRoleWithWebIdentity` § the trust policy does not match your repository § check YOUR_GITHUB_USER and the repository name in /tmp/gh-trust.json. Repositories created after 15 July 2026 can use a new "immutable" subject format (repo:OWNER@ID/REPO@ID:...): copy the sub value from the error details into the trust policy, then `aws iam update-assume-role-policy --role-name querymesh-github-deploy --policy-document file:///tmp/gh-trust.json` [40]
+§ `error: You must be logged in to the server (Unauthorized)` at the helm step § the access entry (rows 7-8) is missing § repeat rows 7-8 in the light blue column
+§ job test fails § a test is red § run `pytest -q` on the VM, fix, commit, push again
+Watch out: never put AWS keys into GitHub secrets for this pipeline. The OIDC role is safer: its credentials live 1 hour and only this repository can get them.
+CHECKPOINT: the Actions run is green, and Step 9 shows the commit ID as image tag (light blue). White column: rows 2-9 ran without error on FakeCloud.
+If not: click the red step in the Actions run; the first red line names the problem.
+## SECTION 6B.15 - Delete everything so the bill stops (teardown)
+WHERE: VS Code Terminal, project ~/querymesh
+GOAL: no AWS resource is left running. The order matters: the ALB must be deleted (by removing the Ingress) BEFORE the cluster, or eksctl cannot delete the network.
+What the light blue column costs while it runs (us-east-1, October 2026 [36][41]):
+§ Item § Price § Per hour for this setup
+§ EKS control plane § US$0.10 per hour § 0.100
+§ 2 x t3.large worker machines § US$0.0832 per hour each § 0.166
+§ NAT gateway § US$0.045 per hour + US$0.045 per GB processed (verify) § 0.045 + data
+§ Application Load Balancer § US$0.0225 per hour + US$0.008 per LCU-hour § about 0.03
+§ Public IPv4 addresses (NAT, ALB) § about US$0.005 per address per hour (verify) § about 0.015
+§ 2 x 30 GB gp3 disks § about US$0.08 per GB-month (verify) § about 0.007
+§ Secrets Manager (1 secret) § US$0.40 per month § 0.0005
+§ ECR storage (about 4 GB) § US$0.10 per GB-month § 0.0005
+§ Total AWS § § about US$0.36 per hour = about US$8.70 per day
+§ Hyperstack RTX A6000 VM (if not hibernated) § about US$0.50 per hour [1] § 0.50
+Step 1. Do the rows of your column, in this order:
+!blue
+§ Step § FakeCloud (free practice) § Real AWS (same step)
+§ 1 Target § `source scripts/use_fakecloud.sh && kubectl config use-context kind-querymesh` § `source scripts/use_aws.sh` and check `kubectl config current-context` shows EKS
+§ 2 Remove QueryMesh (this also removes the Ingress) § `helm uninstall querymesh -n querymesh` § same: the controller now deletes the ALB
+§ 3 Wait until the ALB is gone (light blue) § nothing to wait for § `aws elbv2 describe-load-balancers --query 'LoadBalancers[].LoadBalancerName'` until it prints [] (1-2 minutes)
+§ 4 Remove OpenSearch § `helm uninstall opensearch -n querymesh` § same
+§ 5 Remove ESO and the controller § nothing installed § `helm uninstall external-secrets -n external-secrets` then `helm uninstall aws-load-balancer-controller -n kube-system`
+§ 6 Delete the cluster § `kind delete cluster --name querymesh` then `aws eks delete-cluster --name querymesh` § `eksctl delete cluster --name querymesh --region us-east-1` (10-15 minutes; deletes machines, NAT gateway and VPC)
+§ 7 Delete the FakeCloud network § `aws ec2 delete-subnet --subnet-id $S1 && aws ec2 delete-subnet --subnet-id $S2 && aws ec2 delete-vpc --vpc-id $VPC_ID` § done by eksctl in row 6
+§ 8 Delete the image repositories § `aws ecr delete-repository --repository-name querymesh --force` then `aws ecr delete-repository --repository-name querymesh-ingest --force` § same
+§ 9 Delete the secret immediately § `aws secretsmanager delete-secret --secret-id querymesh/app --force-delete-without-recovery` § same
+§ 10 Delete the GitHub deploy role § `aws iam delete-role-policy --role-name querymesh-github-deploy --policy-name querymesh-deploy` then `aws iam delete-role --role-name querymesh-github-deploy` § same
+§ 11 Delete the GitHub login provider § `aws iam delete-open-id-connect-provider --open-id-connect-provider-arn arn:aws:iam::$ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com` § same
+§ 12 Delete the secrets policy and the practice role § `aws iam delete-policy --policy-arn arn:aws:iam::$ACCOUNT_ID:policy/QueryMeshSecretsRead` then `aws iam delete-role --role-name querymesh-eks-cluster` § `aws iam delete-policy --policy-arn arn:aws:iam::$ACCOUNT_ID:policy/QueryMeshSecretsRead`
+§ 13 Delete the PDF bucket (Section 4.4) § `aws s3 rb s3://querymesh-papers --force` § `aws s3 rb s3://querymesh-papers-$ACCOUNT_ID --force`
+§ 14 Close vLLM's port again § nothing to do § Hyperstack console > querymesh-gpu > Firewall tab > delete the TCP 8000 rule
+§ 15 Remove the GitHub variable § nothing to do § repository Settings > Secrets and variables > Actions > Variables > AWS_ROLE_ARN > delete (otherwise the next push fails: the role is gone)
+§ 16 Final check § `aws eks list-clusters` and `aws ecr describe-repositories` print empty lists § same, plus AWS console > Billing and Cost Management > Bills: no new EKS or EC2 lines from tomorrow on; EC2 > Instances shows nothing running; VPC > NAT gateways shows none or Deleted
+Step 2. Hibernate or delete the Hyperstack VM when you stop working (Section 2A.13).
+Watch out: if eksctl delete fails with "DependencyViolation", something still uses the VPC, almost always the ALB of row 2-3 or a security group the controller made. Open EC2 > Load Balancers, delete the querymesh one, wait 2 minutes, run row 6 again.
+Watch out: deleting the secret with --force-delete-without-recovery cannot be undone. That is what you want here; in production you would keep the default 7-30 day recovery window.
+CHECKPOINT: row 16 shows empty lists and the AWS console shows no running EKS cluster, EC2 machine, NAT gateway or load balancer.
+If not: CloudFormation > Stacks: delete any eksctl-querymesh-... stack that is left (only after the cluster is gone).
+## SECTION 6B.16 - Common mistake at this level
+Mistake: running a command against the wrong place. kubectl talks to whatever `kubectl config current-context` says, and the aws command talks to FakeCloud only while AWS_ENDPOINT_URL is set. People install on EKS while they believe they are on kind, or create "practice" resources in their real account and pay for them for weeks.
+How to spot it: before every block of commands run `kubectl config current-context; echo "${AWS_ENDPOINT_URL:-REAL AWS}"`. The two answers must match the column you are in. Add a monthly AWS budget alert (Section 2B.12) so a forgotten cluster is noticed within a day.
+Second mistake: baking secrets into images or the chart. If a password appears in `docker history querymesh:v1`, in values.yaml or in Git, rotate it at once. Secrets live only in .env (VM), Secrets Manager (cloud) and the Kubernetes Secret.
+## PART 6B RESULT CHECK (all must be true)
+§ Check § Command § Expected
+§ images built § `docker images | grep querymesh` § querymesh v1 and querymesh-ingest v1
+§ Compose worked § Section 6B.2 Step 12 § a grounded answer from containers
+§ chart valid § `helm lint deploy/helm/querymesh` § 0 chart(s) failed
+§ kind deployment § `kubectl --context kind-querymesh -n querymesh get pods` § all pods 1/1 Running (before teardown)
+§ cluster answers § Section 6B.13 row 8 § grounded answer with citations
+§ CI green § GitHub > Actions § test job green (and build-and-deploy green if you did the AWS column)
+§ nothing left running § Section 6B.15 row 16 § empty lists
