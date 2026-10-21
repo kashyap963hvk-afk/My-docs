@@ -467,7 +467,7 @@ You should see: green
 § If you see... § It means... § Do this next
 § curl: (52) Empty reply or (7) Failed to connect § still starting § wait 30 more seconds and repeat Step 9
 § the container stops: docker ps does not list opensearch § it crashed at start § run `docker logs --tail 30 opensearch`; "max virtual memory areas vm.max_map_count [65530] is too low" = repeat Steps 6 and 8
-§ Step 7 shows another address, for example 172.18.0.1 § your Docker bridge uses a different range § change 172.17.0.1 in line 9 of start_opensearch.sh to the address you saw and repeat Step 8 (and use that address wherever this manual says 172.17.0.1)
+§ Step 7 shows another address, for example 172.18.0.1 § your Docker bridge uses a different range § change 172.17.0.1 in line 8 of start_opensearch.sh to the address you saw and repeat Step 8 (and use that address wherever this manual says 172.17.0.1)
 § yellow in Step 11 § an index wants a replica copy on a second node § fine for a single node; Part 4 creates indexes with 0 replicas
 CHECKPOINT: Steps 9-11 print 3.9.0, the two plugin names, and green.
 ## SECTION 2B.12 - Install FakeCloud (free AWS) and the AWS CLI
