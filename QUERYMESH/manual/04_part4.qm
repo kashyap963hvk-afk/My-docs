@@ -1,0 +1,443 @@
+# PART 4 - BASICS: ingestion pipeline and hybrid search (resume lines 3 and 4)
+This part builds the "library": papers come in from arXiv every night, are cut into chunks, turned into vectors and stored in OpenSearch, and one function finds the best chunks for any question. Everything later (the agents, the API, Kubernetes) stands on what you build here.
+## 4.0 What, why, when
+What: an ingestion pipeline (arXiv API -> PDF -> Docling -> chunks -> Jina embeddings -> OpenSearch, plus a copy of each PDF in S3) and a hybrid search function (BM25 + vectors merged with RRF), scheduled every night by an Airflow DAG.
+Why: an LLM alone does not know last week's papers and makes up citations. With a search index of real papers, every answer can point to a real paper.
+When: you run the full pipeline once by hand in this part, then Airflow runs it every night at 02:00 UTC. The hybrid search function is what the Retriever agent calls in Part 5.
+Before you start, all of these must be true (from Part 2B):
+§ Check § Command (VS Code Terminal, folder ~/querymesh) § Expected
+§ venv active § `which python` § /home/ubuntu/querymesh/.venv/bin/python
+§ OpenSearch running § `curl -s localhost:9200 | jq -r .version.number` § 3.9.0
+§ FakeCloud running § `curl -s localhost:4566/_fakecloud/health | jq -r .status` § ok
+§ .env exists § `grep -c CHANGE_ME .env` § a number; JINA_API_KEY must no longer be CHANGE_ME after Section 4.1
+The files you create in this part:
+§ File § Its job
+§ querymesh/embeddings.py § sends text to the Jina API and gets 1024-number vectors back
+§ querymesh/search.py § creates the OpenSearch index and the RRF pipeline, stores chunks, runs hybrid search
+§ querymesh/ingest.py § the whole ingestion pipeline, runnable from the terminal
+§ dags/querymesh_ingest.py § the Airflow DAG that runs ingest.py every night
+## SECTION 4.1 - Get a Jina API key and create querymesh/embeddings.py
+WHERE: web browser on your laptop, then VS Code (connected to querymesh-gpu), folder ~/querymesh
+GOAL: turn any text into a vector of 1024 numbers with one Python function.
+Step 1. In your laptop browser open https://jina.ai/embeddings/
+Step 2. Scroll to the box that shows "API Key" (a key starting with jina_ is created for you automatically, with 10 million free tokens) [17].
+Step 3. Click the copy icon next to the key.
+Watch out: the key is shown on that page only while the browser keeps it. Paste it into .env now (next steps). If you lose it, you can create a new one on the same page (verify: the page layout changes often; look for "API Key" or "Get your API key").
+Step 4. In VS Code Explorer, click the file .env to open it.
+Step 5. Find the line JINA_API_KEY=CHANGE_ME and replace CHANGE_ME with your key, so it looks like this:
+```
+JINA_API_KEY=JINA_KEY_HERE
+```
+§ Placeholder § Replace with § Example
+§ JINA_KEY_HERE § the key you copied in Step 3 § jina_3f9a0c...
+Step 6. Press Ctrl+S.
+Step 7. Create the file querymesh/embeddings.py with THE procedure from Section 2B.3 (right-click the folder querymesh > New File... > type embeddings.py > Enter), paste the grey box below, press Ctrl+S.
+@code querymesh/embeddings.py
+§ Line(s) § What it does (plain English)
+§ `import httpx` § httpx is a library that sends web requests (like a browser, but from Python)
+§ `from querymesh import config` § reads our settings module; config.JINA_API_KEY, config.EMBED_MODEL and config.EMBED_DIM come from .env
+§ `JINA_URL = "https://api.jina.ai/v1/embeddings"` § the web address of Jina's embedding service
+§ `BATCH_SIZE = 32` § we send at most 32 texts per request; smaller requests are less likely to time out
+§ `def embed(texts: list[str], task: str) -> list[list[float]]:` § the one function the rest of QueryMesh uses: give it a list of texts, get back one list of numbers per text
+§ `if not config.JINA_API_KEY: raise RuntimeError(...)` § stops early with a clear message instead of a confusing 401 error from Jina
+§ `for start in range(0, len(texts), BATCH_SIZE):` § walks through the texts 32 at a time: 0-31, 32-63, ...
+§ `batch = texts[start:start + BATCH_SIZE]` § takes the next slice of up to 32 texts
+§ `httpx.post(JINA_URL, headers={"Authorization": f"Bearer {...}"}, ...)` § sends the request; the header proves who you are (Bearer = "the holder of this key")
+§ `"model": config.EMBED_MODEL` § which Jina model to use (jina-embeddings-v5-text-small)
+§ `"task": task` § retrieval.passage when storing chunks, retrieval.query for questions (Section 3.1)
+§ `"dimensions": config.EMBED_DIM` § ask for 1024 numbers per text; must match the OpenSearch mapping in search.py
+§ `"normalized": True` § every vector gets length 1, so cosine similarity works correctly
+§ `timeout=120` § wait at most 120 seconds for an answer, then fail instead of hanging forever
+§ `response.raise_for_status()` § if Jina answered with an error (401, 422, 429...), raise it as a Python error you can read
+§ `sorted(response.json()["data"], key=lambda row: row["index"])` § Jina returns one row per text with its position "index"; sorting guarantees vector 0 belongs to text 0
+§ `vectors.extend(row["embedding"] for row in rows)` § adds this batch's vectors to the full result list
+§ `if __name__ == "__main__":` § this block runs only when you start the file directly with python -m, not when another file imports it
+§ `print(f"dimensions={len(vector)} ...")` § a quick self-test: prints how many numbers came back and the first five
+Step 8. In the VS Code Terminal (folder ~/querymesh, venv active) run the self-test:
+```
+python -m querymesh.embeddings
+```
+You should see: one line like dimensions=1024 first_values=[0.0123, -0.0456, 0.0311, 0.0087, -0.0219] (your numbers will be different).
+§ If you see... § It means... § Do this next
+§ RuntimeError: JINA_API_KEY is empty § .env was not saved or the line is misspelled § open .env, check the exact name JINA_API_KEY, press Ctrl+S, run Step 8 again
+§ httpx.HTTPStatusError: 401 § the key is wrong or has a space at the end § copy the key again from the Jina page (Steps 1-6)
+§ httpx.HTTPStatusError: 422 or 400 mentioning task or model § the model name or task is not accepted § in .env set EMBED_MODEL=jina-embeddings-v3 (also 1024 dims), save, run Step 8 again
+§ httpx.HTTPStatusError: 429 § too many requests per minute on the free tier § wait one minute and run again
+§ ModuleNotFoundError: No module named 'querymesh' § the venv is not active or you are not in ~/querymesh § run `cd ~/querymesh && source .venv/bin/activate`
+CHECKPOINT: the self-test prints dimensions=1024.
+If not: use the branch table above; the most common cause is a key with a trailing space.
+## SECTION 4.2 - Create querymesh/search.py and set up the index
+WHERE: VS Code, folder ~/querymesh
+GOAL: an OpenSearch index that can store text and vectors, an RRF search pipeline, and a hybrid_search() function.
+Step 1. Create the file querymesh/search.py (right-click querymesh > New File... > search.py > Enter).
+Step 2. Paste the grey box below.
+Step 3. Press Ctrl+S.
+@code querymesh/search.py
+§ Line(s) § What it does (plain English)
+§ `from opensearchpy import OpenSearch, helpers` § the official OpenSearch Python client; helpers contains the fast "bulk" upload
+§ `from querymesh.embeddings import embed` § re-uses the function from Section 4.1
+§ `client = OpenSearch(hosts=[config.OPENSEARCH_URL], timeout=60)` § one connection object to http://localhost:9200, shared by every function in this file
+§ `INDEX_BODY = {...}` § the "table design" of our index: settings + the type of every field
+§ `"index": {"knn": True, ...}` § switches on vector (k-NN) search for this index
+§ `"number_of_shards": 1, "number_of_replicas": 0` § one piece, no copies: right for a single-node OpenSearch (a replica would have no second node to live on, and the index would stay yellow)
+§ `"chunk_id": {"type": "keyword"}` § keyword = stored exactly, not split into words; used as an ID, for example 2510.01234v1-7
+§ `"paper_id": {"type": "keyword"}` § the arXiv ID; exact matching lets us check "is this paper already indexed?"
+§ `"title": {"type": "text"}` § text = split into words for BM25 search
+§ `"authors": {"type": "keyword"}` § author names stored exactly (a list is fine)
+§ `"published": {"type": "date"}` § the publication date, stored as a real date so you could filter "newer than"
+§ `"text": {"type": "text", "analyzer": "english"}` § the chunk text for BM25; the english analyzer also matches word forms (ranking, ranked, rank)
+§ `"embedding": {"type": "knn_vector", "dimension": config.EMBED_DIM, ...}` § the vector field: exactly 1024 numbers per chunk
+§ `"method": {"name": "hnsw", "engine": "lucene", "space_type": "cosinesimil"}` § HNSW is a fast graph index for "find the nearest vectors"; lucene is the built-in engine; cosinesimil compares directions (meaning)
+§ `PIPELINE_BODY = {...}` § the search pipeline: runs after both searches and merges their lists
+§ `"score-ranker-processor": {"combination": {"technique": "rrf", "rank_constant": 60}}` § Reciprocal Rank Fusion with k = 60, exactly the formula of Section 3.3 [15]
+§ `def setup() -> None:` § creates the index (only if it does not exist yet) and the pipeline; safe to run many times
+§ `client.indices.exists(...)` / `client.indices.create(...)` § "does the index exist?" and "create it with INDEX_BODY"
+§ `client.transport.perform_request("PUT", f"/_search/pipeline/{...}", body=PIPELINE_BODY)` § sends the raw REST call PUT /_search/pipeline/querymesh-rrf; PUT replaces any old version, so re-running is harmless
+§ `def paper_exists(paper_id)` § counts chunks with this paper_id; more than 0 means "already indexed, skip it"
+§ `def index_chunks(chunks)` § embeds every chunk and stores it, all in one bulk request
+§ `embed([c["title"] + "\n" + c["text"] for c in chunks], "retrieval.passage")` § the vector is made from title + text, so a chunk "knows" which paper it is from; task retrieval.passage because these are documents
+§ `{"_index": ..., "_id": c["chunk_id"], "_source": {**c, "embedding": v}}` § one bulk action per chunk; _id = chunk_id, so indexing the same chunk twice overwrites instead of duplicating
+§ `helpers.bulk(client, actions, refresh=True)` § uploads all chunks in one request; refresh=True makes them searchable immediately
+§ `def hybrid_search(query, k=config.TOP_K)` § returns the best k chunks (8 by default) for a question
+§ `vector = embed([query], "retrieval.query")[0]` § the question becomes a vector, with the query task
+§ `"_source": {"excludes": ["embedding"]}` § do not send the 1024 numbers back; we only need the text and metadata
+§ `"hybrid": {"queries": [...]}` § run two searches on the same request [14]
+§ `{"multi_match": {"query": query, "fields": ["title^2", "text"]}}` § search 1, BM25: words in the title count double (^2)
+§ `{"knn": {"embedding": {"vector": vector, "k": k * 5}}}` § search 2, vectors: the 40 nearest chunks, so RRF has enough candidates to merge
+§ `params={"search_pipeline": config.SEARCH_PIPELINE}` § tells OpenSearch to merge the two lists with our RRF pipeline
+§ `[{**hit["_source"], "score": hit["_score"]} for hit in ...]` § turns each result into a simple dictionary and adds its RRF score
+§ `if sys.argv[1:] == ["setup"]:` § python -m querymesh.search setup creates index + pipeline; any other words are treated as a question
+Step 4. Create the index and the pipeline:
+```
+python -m querymesh.search setup
+```
+You should see:
+```
+created index arxiv-chunks
+search pipeline querymesh-rrf is ready
+```
+Step 5. Run the same command a second time:
+```
+python -m querymesh.search setup
+```
+You should see: only search pipeline querymesh-rrf is ready (the index already exists, so it is not created again).
+Step 6. Check the vector field in OpenSearch:
+```
+curl -s localhost:9200/arxiv-chunks/_mapping | jq '.["arxiv-chunks"].mappings.properties.embedding'
+```
+You should see: "type": "knn_vector" and "dimension": 1024 with the hnsw method.
+Step 7. Check the pipeline:
+```
+curl -s localhost:9200/_search/pipeline/querymesh-rrf | jq '.["querymesh-rrf"].phase_results_processors'
+```
+You should see: a list with "score-ranker-processor" and "technique": "rrf".
+§ If you see... § It means... § Do this next
+§ ConnectionError ... localhost:9200 § OpenSearch is not running § run `bash scripts/start_opensearch.sh`, wait 30 seconds, `curl -s localhost:9200`
+§ an error that mentions score-ranker-processor is unknown § OpenSearch older than 2.19 § check `curl -s localhost:9200 | jq -r .version.number`; it must be 3.9.0 (Section 2B.11)
+§ resource_already_exists_exception § two setups ran at the same time § ignore it; run Step 5 once more
+Watch out: if you later change EMBED_DIM or EMBED_MODEL, the old vectors no longer fit. Delete the index with `curl -s -X DELETE localhost:9200/arxiv-chunks`, run Step 4 again and re-ingest (Section 4.5).
+CHECKPOINT: Step 6 shows dimension 1024 and Step 7 shows rrf.
+If not: read the branch table; 9 out of 10 times OpenSearch is simply not running.
+## SECTION 4.3 - Create querymesh/ingest.py (the ingestion pipeline)
+WHERE: VS Code, folder ~/querymesh
+GOAL: one command that fetches the newest arXiv papers, parses the PDFs with Docling, chunks, embeds, stores them in OpenSearch and copies each PDF to S3.
+Step 1. Create the file querymesh/ingest.py (right-click querymesh > New File... > ingest.py > Enter).
+Step 2. Paste the grey box below.
+Step 3. Press Ctrl+S.
+@code querymesh/ingest.py
+§ Line(s) § What it does (plain English)
+§ `import arxiv` § the arxiv package (version 4.0.1) talks to the arXiv API at export.arxiv.org for us [11]
+§ `import boto3` § the AWS library for Python; it talks to S3 on FakeCloud or on real AWS
+§ `DATA_DIR = Path("data/pdfs")` § downloaded PDFs are kept in ~/querymesh/data/pdfs (the folder is in .gitignore)
+§ `CHUNK_CHARS = 1500` and `OVERLAP_CHARS = 200` § chunk size and overlap from Section 3.4
+§ `_converter = None` § Docling takes several seconds to load its models, so we load it once and keep it in this variable
+§ `arxiv.Client(page_size=..., delay_seconds=3.0, num_retries=3)` § arXiv allows one request every 3 seconds [10]; the client waits for us and retries 3 times on network errors
+§ `arxiv.Search(query=query, max_results=max_papers, sort_by=arxiv.SortCriterion.SubmittedDate)` § "newest first"; query uses arXiv syntax such as cat:cs.CL AND abs:retrieval (category Computation and Language, abstract contains retrieval)
+§ `result.get_short_id()` § the arXiv ID with version, for example 2510.01234v1
+§ `" ".join(result.title.split())` § removes line breaks and double spaces that arXiv titles often contain
+§ `[a.name for a in result.authors][:10]` § author names, at most 10 (some papers have hundreds)
+§ `result.published.date().isoformat()` § the date as text 2026-10-20, which OpenSearch stores as a date
+§ `"pdf_url": result.pdf_url` § where the PDF can be downloaded
+§ `"summary": ...` § the abstract; the Scout agent indexes only this (fast path)
+§ `def download_pdf(paper)` § downloads the PDF once into data/pdfs; if the file already exists it is not downloaded again
+§ `paper['paper_id'].replace('/', '_')` § very old arXiv IDs contain a slash (hep-th/9901001), which is not allowed in a file name
+§ `httpx.get(..., follow_redirects=True, timeout=120)` § arXiv redirects PDF links; follow_redirects follows them to the real file
+§ `def pdf_to_markdown(path)` § PDF in, Markdown text out
+§ `from docling... import ...` (inside the function) § Docling is imported only when it is really needed; the API and the agents never parse PDFs, so they start fast and do not need Docling installed
+§ `PdfPipelineOptions(do_ocr=False, do_table_structure=True)` § arXiv PDFs already contain real text, so OCR (reading pixels) is switched off: much faster; tables are still recognised
+§ `DocumentConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)})` § a converter that uses those options for PDF files
+§ `_converter.convert(str(path)).document.export_to_markdown()` § parse the PDF and return Markdown with # headings, paragraphs and tables [12]
+§ `markdown.split("\n## References")[0]` § keeps only the text before the References heading
+§ `re.split(r"\n(?=#{1,3} )", markdown)` § cuts the text in front of every heading line that starts with #, ## or ### (the heading stays with its section)
+§ `while start < len(section):` ... `start += CHUNK_CHARS - OVERLAP_CHARS` § moves a 1,500-character window forward by 1,300 characters each time, so neighbouring chunks share 200 characters
+§ `if len(piece) > 100:` § ignores tiny leftovers such as a lonely page number
+§ `def upload_pdf(path)` § copies the PDF to s3://PAPERS_BUCKET/pdfs/FILE.pdf
+§ `if config.PAPERS_BUCKET:` § if PAPERS_BUCKET is empty in .env, the upload is skipped (useful if you have no S3 at all)
+§ `boto3.client("s3").upload_file(...)` § boto3 reads AWS_ENDPOINT_URL and the keys from the environment (the AWS_ lines of .env): FakeCloud when they are there, real AWS when they are removed
+§ `def make_chunks(paper, texts)` § glues the paper's metadata onto every chunk and gives each chunk the id PAPERID-NUMBER
+§ `def ingest_full_text(query, max_papers)` § the nightly job: setup, fetch, skip known papers, download, parse, chunk, index, upload
+§ `if search.paper_exists(paper["paper_id"]): skipped.append(...); continue` § papers that are already in the index are not processed again; this makes the job safe to re-run
+§ `print(f"indexed {paper['paper_id']}: {count} chunks ...")` § one progress line per new paper
+§ `def ingest_abstracts(query, max_papers)` § the fast path for the Scout agent: one chunk per paper made from the abstract only, no PDF, no Docling (seconds instead of minutes)
+§ `argparse.ArgumentParser(...)` § turns command-line options into Python values
+§ `--query`, `--max-papers`, `--abstracts-only` § what to search on arXiv, how many papers, and whether to use the fast path
+§ `run = ingest_abstracts if args.abstracts_only else ingest_full_text` § picks the function, then runs it and prints the result dictionary
+CHECKPOINT: `python -c "import querymesh.ingest; print('ok')"` prints ok.
+If not: a SyntaxError means the paste was incomplete; delete the file content (Ctrl+A, Delete), paste again, Ctrl+S.
+## SECTION 4.4 - Create the S3 bucket for the PDFs (FakeCloud first, then real AWS)
+WHERE: VS Code Terminal, folder ~/querymesh
+GOAL: an S3 bucket that receives a copy of every ingested PDF, and a .env that points ingestion at it.
+Why S3 at all? The VM's disk is temporary (you will delete the VM one day). S3 keeps the original PDFs safely and cheaply, and the Kubernetes ingest job in Part 6B can use the same bucket.
+Step 1. Do every row of the table below in YOUR column. Do the white FakeCloud column first. Do the light-blue column only when you decide to use real AWS.
+!blue
+§ Step § FakeCloud (free practice) § Real AWS (same step)
+§ 1 Target § `source scripts/use_fakecloud.sh` § `source scripts/use_aws.sh`
+§ 2 Who am I § `aws sts get-caller-identity --query Account --output text`\nYou should see: 123456789012 § same command\nYou should see: your real 12-digit account ID. Write it down as ACCOUNT_ID
+§ 3 Bucket name § `export BUCKET=querymesh-papers` § `export BUCKET=querymesh-papers-ACCOUNT_ID`\n(S3 names are global: nobody else may own the same name, so we add your account ID)
+§ 4 Create bucket § `aws s3 mb s3://$BUCKET` § same command\nYou should see: make_bucket: querymesh-papers-123456789012
+§ 5 Block public access § not needed (FakeCloud is only on your VM) § `aws s3api put-public-access-block --bucket $BUCKET --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true`
+§ 6 Check § `aws s3 ls` § same command; console: S3 > Buckets shows the bucket
+§ 7 .env for Python § keep these 4 lines in .env exactly:\n`AWS_ENDPOINT_URL=http://localhost:4566`\n`AWS_ACCESS_KEY_ID=test`\n`AWS_SECRET_ACCESS_KEY=test`\n`AWS_DEFAULT_REGION=us-east-1`\nand `PAPERS_BUCKET=querymesh-papers` § DELETE the 4 AWS_ lines from .env (boto3 then uses the keys you saved with aws configure in Section 2B.12)\nand set `PAPERS_BUCKET=querymesh-papers-ACCOUNT_ID`
+§ 8 Save § Ctrl+S in .env § Ctrl+S in .env
+§ Cost § US$0 § S3 Standard about US$0.023 per GB-month; 100 PDFs are about 0.2 GB, so less than 1 cent per month (verify on the S3 pricing page)
+§ Placeholder § Replace with § Example
+§ ACCOUNT_ID § the 12-digit number from row 2 of the blue column § 123456789012
+Watch out: `source scripts/use_fakecloud.sh` changes only the CURRENT terminal (the aws command). Python reads the AWS_ lines from .env instead. Both must point at the same place, otherwise the CLI looks in FakeCloud while Python uploads to AWS (or the other way round).
+Watch out: never put real AWS keys into .env; real AWS uses the credentials file that aws configure created in ~/.aws/.
+CHECKPOINT: `aws s3 ls` (in your column's target) lists your bucket, and .env has the PAPERS_BUCKET line for the same target.
+If not: "Could not connect to the endpoint URL http://localhost:4566" = FakeCloud is not running: `nohup fakecloud --storage-mode persistent --data-path ~/fakecloud-data > ~/fakecloud.log 2>&1 &`, wait 3 seconds, repeat row 4. "BucketAlreadyExists" on AWS = the name is taken: add -2 to the end of the name.
+## SECTION 4.5 - Run the first ingestion (3 papers)
+WHERE: VS Code Terminal, folder ~/querymesh, venv active
+GOAL: real arXiv papers in OpenSearch and their PDFs in S3.
+Step 1. Start a tmux window so the job survives a disconnect:
+```
+tmux new -s ingest
+```
+Step 2. Make sure you are in the project with the venv active (tmux opens a fresh shell):
+```
+cd ~/querymesh && source .venv/bin/activate
+```
+Step 3. Run the pipeline for 3 papers:
+```
+python -m querymesh.ingest --query "cat:cs.CL AND abs:retrieval" --max-papers 3
+```
+You should see (the first run takes 2-5 minutes because Docling downloads its layout models, a few hundred MB, from Hugging Face):
+```
+search pipeline querymesh-rrf is ready
+indexed 2510.xxxxxv1: 34 chunks  SOME PAPER TITLE ...
+indexed 2510.yyyyyv1: 52 chunks  ANOTHER PAPER TITLE ...
+indexed 2510.zzzzzv1: 27 chunks  A THIRD PAPER TITLE ...
+{'added': ['2510.xxxxxv1', '2510.yyyyyv1', '2510.zzzzzv1'], 'skipped': []}
+```
+The IDs, titles and chunk counts are different for you: these are the newest papers on the day you run it.
+Step 4. Run exactly the same command again:
+```
+python -m querymesh.ingest --query "cat:cs.CL AND abs:retrieval" --max-papers 3
+```
+You should see: no "indexed" lines and {'added': [], 'skipped': [three IDs]} (unless new papers appeared in the last minutes). This proves the job is safe to re-run.
+Step 5. Try the fast path that the Scout agent will use (abstracts only, no PDF):
+```
+python -m querymesh.ingest --query "all:hallucination AND all:retrieval" --max-papers 5 --abstracts-only
+```
+You should see: {'added': [up to 5 IDs]} within about 15 seconds.
+Step 6. Detach from tmux (the window keeps running): press Ctrl+B, release, then press D.
+Step 7. Check the PDFs in S3 (in the same column/target as Section 4.4):
+```
+source scripts/use_fakecloud.sh && aws s3 ls s3://querymesh-papers/pdfs/
+```
+You should see: three lines, one per PDF, with a size in bytes (real AWS: use s3://querymesh-papers-ACCOUNT_ID/pdfs/ after source scripts/use_aws.sh).
+§ If you see... § It means... § Do this next
+§ arxiv.HTTPError or 503 from export.arxiv.org § arXiv is busy or rate-limiting § wait 1 minute and run again; never lower delay_seconds below 3
+§ {'added': [], 'skipped': []} on the FIRST run § the query matched no papers § copy the query exactly, including the capital AND
+§ httpx.HTTPStatusError 401 from api.jina.ai § Jina key problem § Section 4.1, branch table
+§ botocore ... Could not connect to the endpoint URL § FakeCloud is not running while .env points at it § start FakeCloud (Section 4.4 If not), then run Step 3 again
+§ botocore ... NoSuchBucket § the bucket in PAPERS_BUCKET does not exist in that target § repeat Section 4.4 row 4 in the right column
+§ a very long pause on "indexed" of the first paper § Docling is downloading models (first run only) § wait; the next papers are much faster
+§ torch or CUDA warnings from Docling § harmless; Docling uses the GPU if it can, otherwise the CPU § ignore them if the indexed lines appear
+Watch out: the chunks are indexed BEFORE the PDF is uploaded. If the upload fails, the paper is already in OpenSearch and the next run skips it, so the PDF never reaches S3. Fix the S3 problem first, then delete that paper's chunks (Section 4.7, Step 6) and run again.
+CHECKPOINT: Step 3 printed at least one indexed line, Step 4 skipped them, and Step 7 lists the PDFs.
+If not: use the branch table; read the LAST lines of the error first, they name the real problem.
+## SECTION 4.6 - Test hybrid search
+WHERE: VS Code Terminal, folder ~/querymesh, venv active
+GOAL: see BM25 and vector search merged by RRF return sensible chunks.
+Step 1. Ask a question that fits your papers:
+```
+python -m querymesh.search "How can retrieval reduce hallucination in language models?"
+```
+You should see: up to 5 results shaped like this:
+```
+[1] 0.0325 2510.xxxxxv1 SOME PAPER TITLE
+    ## 3 Method We propose a retrieval step that ...
+[2] 0.0323 2510.yyyyyv1 ANOTHER PAPER TITLE
+    Retrieval-augmented generation (RAG) reduces ...
+```
+Step 2. Look at the scores: they are small numbers around 0.016 to 0.033. That is RRF: 1/61 + 1/61 = 0.0328 is the maximum for a chunk ranked first in both lists (Section 3.3).
+Step 3. Try a question with an exact term (BM25 helps here):
+```
+python -m querymesh.search "BM25"
+```
+Step 4. Try a paraphrase with no shared words (vectors help here):
+```
+python -m querymesh.search "models inventing facts that are not true"
+```
+You should see: chunks about hallucination, although the word hallucination is not in your question.
+§ If you see... § It means... § Do this next
+§ an empty result (no lines) § the index is empty § run Section 4.5 Step 3
+§ search_phase_execution_exception mentioning hybrid § the pipeline is missing § run `python -m querymesh.search setup`
+§ all scores exactly 0.0164 § each chunk was found by only ONE of the two searches § normal for a tiny index; it improves when you have 50+ papers
+CHECKPOINT: Step 4 returns hallucination-related chunks.
+If not: ingest more papers (`--max-papers 20`) and try again; with 3 papers there may simply be nothing relevant.
+## SECTION 4.7 - Look inside OpenSearch (so nothing is magic)
+WHERE: VS Code Terminal (any folder)
+GOAL: count, read and delete chunks by hand with curl.
+Step 1. Count all chunks:
+```
+curl -s localhost:9200/arxiv-chunks/_count | jq .count
+```
+You should see: a number such as 113 (three papers + the abstracts from Step 5 of 4.5).
+Step 2. Read one chunk without its vector:
+```
+curl -s 'localhost:9200/arxiv-chunks/_search?size=1&_source_excludes=embedding' | jq '.hits.hits[0]._source'
+```
+You should see: chunk_id, paper_id, title, authors, published, url and text.
+Step 3. Count the chunks of each paper:
+```
+curl -s localhost:9200/arxiv-chunks/_search -H 'Content-Type: application/json' -d '{"size":0,"aggs":{"papers":{"terms":{"field":"paper_id","size":50}}}}' | jq '.aggregations.papers.buckets'
+```
+You should see: one entry per paper with its doc_count (the number of chunks).
+Step 4. Run a BM25-only search (no vectors, no pipeline) to compare with Section 4.6:
+```
+curl -s localhost:9200/arxiv-chunks/_search -H 'Content-Type: application/json' -d '{"size":3,"_source":["title"],"query":{"match":{"text":"hallucination"}}}' | jq '.hits.hits[] | {score: ._score, title: ._source.title}'
+```
+You should see: BM25 scores like 7.81 or 12.4: a completely different scale from vector scores. This is exactly why we merge by rank (RRF) and not by score.
+Step 5. Note one paper_id from Step 3 that you want to remove (only if you need to re-ingest it).
+Step 6. (Optional) Delete all chunks of that paper:
+```
+curl -s -X POST localhost:9200/arxiv-chunks/_delete_by_query -H 'Content-Type: application/json' -d '{"query":{"term":{"paper_id":"PAPER_ID"}}}' | jq .deleted
+```
+§ Placeholder § Replace with § Example
+§ PAPER_ID § an ID from Step 3 § 2510.01234v1
+Watch out: in curl commands the single quotes around the JSON matter; copy the whole line.
+CHECKPOINT: Step 1 prints a number above 0 and Step 2 shows a readable chunk.
+If not: "index_not_found_exception" = run `python -m querymesh.search setup` and Section 4.5 again.
+## SECTION 4.8 - Install Airflow 3.3.2 and schedule ingestion every night
+WHERE: VS Code Terminal on the VM, then your laptop browser (through VS Code port forwarding)
+GOAL: Airflow runs the ingestion pipeline every day at 02:00 UTC, and you can trigger it by hand.
+Why a separate venv? Airflow pins hundreds of exact library versions. If it shared our .venv, it would fight with LangGraph and FastAPI. So Airflow lives in ~/airflow-venv and simply runs our project's own Python (.venv/bin/python) as a command.
+Step 1. Create the Airflow venv:
+```
+uv venv -p 3.12 ~/airflow-venv
+```
+Step 2. Activate it:
+```
+source ~/airflow-venv/bin/activate
+```
+Step 3. Install Airflow 3.3.2 with its official constraints file (takes 1-3 minutes) [13]:
+```
+uv pip install "apache-airflow==3.3.2" --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-3.3.2/constraints-3.12.txt"
+```
+You should see: Installed NNN packages (a few hundred).
+Step 4. Check the version:
+```
+airflow version
+```
+You should see: 3.3.2 (the first run also creates ~/airflow with a config file; a warning about AIRFLOW_HOME is fine).
+Step 5. Create the Airflow home folder (it may already exist after Step 4):
+```
+mkdir -p ~/airflow
+```
+Step 6. Link Airflow's DAG folder to the project's dags folder, so a DAG you save in VS Code is seen by Airflow at once:
+```
+ln -sfn ~/querymesh/dags ~/airflow/dags
+```
+Step 7. Check the link:
+```
+ls -l ~/airflow/dags
+```
+You should see: dags -> /home/ubuntu/querymesh/dags
+Step 8. In VS Code create the file dags/querymesh_ingest.py (right-click the folder dags > New File... > querymesh_ingest.py > Enter), paste the grey box below, press Ctrl+S.
+@code dags/querymesh_ingest.py
+§ Line(s) § What it does (plain English)
+§ `from airflow.providers.standard.operators.bash import BashOperator` § in Airflow 3 the BashOperator lives in the "standard" provider (installed with Airflow); it runs one shell command as a task
+§ `from airflow.sdk import dag` § Airflow 3's new import path for the @dag decorator
+§ `PROJECT = "/home/ubuntu/querymesh"` § the full path of the project; Airflow tasks do not start in your folder, so we always cd there first
+§ `TOPICS = {...}` § two searches: RAG papers (cs.CL + retrieval) and agent papers (cs.AI + agent); add more lines here to follow more topics
+§ `@dag(dag_id="querymesh_ingest", ...)` § turns the function below into a DAG called querymesh_ingest
+§ `schedule="0 2 * * *"` § a cron expression: minute 0, hour 2, every day, every month, every weekday = daily at 02:00 UTC
+§ `start_date=datetime(2026, 10, 1)` § the first date the schedule is valid from
+§ `catchup=False` § do NOT create runs for all the past days since start_date; only the latest one
+§ `tags=["querymesh"]` § a label you can filter by in the Airflow UI
+§ `for name, query in TOPICS.items():` § creates one task per topic
+§ `BashOperator(task_id=f"ingest_{name}", ...)` § the tasks are called ingest_rag and ingest_agents
+§ `bash_command=(f"cd {PROJECT} && .venv/bin/python -m querymesh.ingest --query '...' --max-papers 10")` § go into the project and run the SAME command you ran by hand in 4.5, with the project's Python, 10 papers per topic; load_dotenv then reads ~/querymesh/.env
+§ `retries=2` § if arXiv or Jina has a hiccup, Airflow tries the task again, up to 2 more times
+§ `previous >> task` § ">>" means "run after": ingest_agents waits until ingest_rag has finished, so we never call arXiv twice at the same time
+§ `querymesh_ingest()` § calling the function registers the DAG; without this line Airflow sees nothing
+Step 9. Start a new tmux session for Airflow:
+```
+tmux new -s airflow
+```
+Step 10. Inside tmux, activate the Airflow venv:
+```
+source ~/airflow-venv/bin/activate
+```
+Step 11. Tell Airflow where its home is:
+```
+export AIRFLOW_HOME=~/airflow
+```
+Step 12. Start Airflow (database, scheduler, DAG processor, API server and UI, all in one command):
+```
+airflow standalone
+```
+You should see: many log lines; after about 30-90 seconds a block that says Airflow is ready, with the login user admin. Leave it running.
+Step 13. Detach from tmux: press Ctrl+B, release, then press D.
+Step 14. Read the generated admin password:
+```
+cat ~/airflow/simple_auth_manager_passwords.json.generated
+```
+You should see: {"admin": "SOMEPASSWORD"}. Copy the password (without the quotes).
+Step 15. In VS Code click the PORTS tab (next to TERMINAL; if you do not see it: View > Open View... > Ports).
+Step 16. Click Forward a Port.
+Step 17. Type 8080 and press Enter.
+You should see: a row 8080 -> localhost:8080.
+Step 18. On your laptop, open a browser at http://localhost:8080
+Step 19. Log in:
+§ Field § Value § Why
+§ Username § admin § the user airflow standalone created
+§ Password § the password from Step 14 § generated once and kept in that file
+Step 20. Click Dags in the left menu.
+You should see: querymesh_ingest in the list (if it is not there yet, wait 30 seconds and reload: the DAG processor scans the folder regularly).
+Step 21. Click the pause/unpause toggle next to querymesh_ingest so it turns on (blue/active).
+Watch out: right after you unpause, Airflow may start one run by itself for the latest scheduled time. That is normal (catchup=False only skips the older days).
+Step 22. Click the name querymesh_ingest to open it.
+Step 23. Click the Trigger button (top right, play icon) and then Trigger in the dialog that opens.
+You should see: a new run with state queued, then running; ingest_rag turns green (success) first, then ingest_agents.
+Step 24. Click the green box of ingest_rag in the grid view.
+Step 25. Click the Logs tab.
+You should see: the same lines as in Section 4.5, for example indexed 2510.....: NN chunks, and at the end the dictionary with added and skipped, then "Command exited with return code 0".
+Step 26. Back in the VS Code terminal, check that the chunk count went up:
+```
+curl -s localhost:9200/arxiv-chunks/_count | jq .count
+```
+§ If you see... § It means... § Do this next
+§ querymesh_ingest does not appear after 2 minutes § the DAG file has an error § in a new terminal: `source ~/airflow-venv/bin/activate && export AIRFLOW_HOME=~/airflow && airflow dags list-import-errors`, fix the line it names, Ctrl+S
+§ Address already in use :8080 § something else uses port 8080 § `sudo lsof -i :8080`, stop that program, start airflow standalone again
+§ the task is red (failed) and the log says No such file or directory: .venv/bin/python § the project venv is missing or the path is wrong § check `ls ~/querymesh/.venv/bin/python`; the project must be in /home/ubuntu/querymesh
+§ the task log shows a Jina, arXiv or S3 error § the same errors as Section 4.5 § use the branch table in 4.5; then click the task > Clear task to run it again
+§ the browser cannot open localhost:8080 § the port is not forwarded or VS Code is disconnected § repeat Steps 15-17 while VS Code is connected
+§ cat says No such file for the password file § Airflow is not fully started yet § wait 1 minute, run Step 14 again; check the tmux window with `tmux attach -t airflow`
+Watch out: airflow standalone is made for learning and one machine. It keeps running only while the VM is on; after a hibernate/restore start it again with Steps 9-13. Production teams run Airflow on Kubernetes or use a managed service (Amazon MWAA, Astronomer). In Part 6B the same job also exists as a Kubernetes CronJob.
+CHECKPOINT: the manual run shows both tasks green, and the chunk count in Step 26 is higher than before.
+If not: open the red task's Logs tab and read the last 20 lines; they name the exact problem.
+## 4.9 Common mistake at this level
+Mixing up the two embedding tasks, or changing the embedding model after data is indexed. Symptom: search returns chunks that have nothing to do with the question, although everything "works" and there are no errors. How to spot it: run the BM25-only query from Section 4.7 Step 4; if BM25 finds the right paper but hybrid_search does not rank it in the top 5, the vectors are wrong. Fix: make sure chunks use retrieval.passage and questions use retrieval.query (they do in our code), and if you ever change EMBED_MODEL or EMBED_DIM, delete the index (Section 4.2 Watch out) and ingest again.
+A second classic mistake: running ingestion with the aws CLI pointed at FakeCloud but .env pointed at real AWS (or the reverse). Symptom: aws s3 ls shows no PDFs although ingestion succeeded. Fix: compare `echo $AWS_ENDPOINT_URL` with the AWS_ENDPOINT_URL line in .env (Section 4.4).
+## PART 4 RESULT CHECK (all must be true before Part 5)
+§ Check § Command § Expected
+§ embeddings work § `python -m querymesh.embeddings` § dimensions=1024
+§ index + pipeline § `curl -s localhost:9200/_search/pipeline/querymesh-rrf | jq 'keys'` § ["querymesh-rrf"]
+§ chunks stored § `curl -s localhost:9200/arxiv-chunks/_count | jq .count` § a number above 50
+§ hybrid search § `python -m querymesh.search "retrieval augmented generation"` § 5 numbered results with scores around 0.016-0.033
+§ PDFs in S3 § `source scripts/use_fakecloud.sh && aws s3 ls s3://querymesh-papers/pdfs/` § at least 3 PDF files
+§ Airflow § browser http://localhost:8080 > Dags > querymesh_ingest § unpaused, last run green
+You have now built resume line 3 (ingestion: arXiv API, Docling parsing, Airflow DAG scheduling) and resume line 4 (hybrid search: OpenSearch BM25 + Jina embeddings + RRF).
