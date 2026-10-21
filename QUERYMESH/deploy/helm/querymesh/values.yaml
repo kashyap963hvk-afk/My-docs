@@ -1,0 +1,67 @@
+# Default settings. values-kind.yaml and values-eks.yaml change only what differs.
+image:
+  repository: querymesh
+  tag: v1
+  pullPolicy: IfNotPresent
+ingestImage:
+  repository: querymesh-ingest
+  tag: v1
+
+# Non-secret settings -> ConfigMap -> environment variables in every pod
+env:
+  OPENSEARCH_URL: http://opensearch-cluster-master:9200
+  INDEX_NAME: arxiv-chunks
+  SEARCH_PIPELINE: querymesh-rrf
+  EMBED_MODEL: jina-embeddings-v5-text-small
+  EMBED_DIM: "1024"
+  LLM_BASE_URL: http://CHANGE-ME:8000/v1
+  LLM_MODEL: qwen3-4b
+  WORKER_MODE: remote
+  API_USERNAME: admin
+  PAPERS_BUCKET: ""
+
+# Secret settings live in this Kubernetes Secret (made by hand on kind, by ESO on EKS)
+secretName: querymesh-secrets
+externalSecrets:
+  enabled: false
+  storeName: aws-secretsmanager
+  remoteKey: querymesh/app
+
+agents:
+  - name: retriever
+    port: 8101
+  - name: grader
+    port: 8102
+  - name: writer
+    port: 8103
+  - name: critic
+    port: 8104
+  - name: scout
+    port: 8105
+
+api:
+  replicas: 2
+  port: 8090
+gradio:
+  enabled: true
+  port: 7860
+telegram:
+  enabled: false
+
+ingest:
+  schedule: "0 2 * * *"
+  query: "cat:cs.CL AND abs:retrieval"
+  maxPapers: 10
+
+resources:
+  requests: {cpu: 100m, memory: 256Mi}
+  limits: {memory: 1Gi}
+
+ingress:
+  enabled: false
+  className: alb
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /healthz
+    alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=300

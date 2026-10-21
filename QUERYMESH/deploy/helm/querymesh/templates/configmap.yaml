@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: querymesh-config
+data:
+  {{- range $key, $value := .Values.env }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+  AGENT_URLS: "{{- range $i, $a := .Values.agents }}{{ if $i }},{{ end }}http://querymesh-{{ $a.name }}:{{ $a.port }}{{- end }}"
+  API_URL: "http://querymesh-api:80"

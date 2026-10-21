@@ -1,0 +1,50 @@
+# The whole QueryMesh app on one machine. OpenSearch and vLLM already run on the VM itself,
+# so the containers reach them through host.docker.internal.
+x-app: &app
+  image: querymesh:v1
+  env_file: .env
+  restart: unless-stopped
+  extra_hosts: ["host.docker.internal:host-gateway"]
+  environment: &app-env
+    OPENSEARCH_URL: http://host.docker.internal:9200
+    LLM_BASE_URL: http://host.docker.internal:8000/v1
+    WORKER_MODE: remote
+    AGENT_URLS: http://retriever:8101,http://grader:8102,http://writer:8103,http://critic:8104,http://scout:8105
+
+services:
+  retriever:
+    <<: *app
+    command: ["python", "-m", "querymesh.agents", "retriever"]
+    environment: {<<: *app-env, PUBLIC_URL: "http://retriever:8101"}
+  grader:
+    <<: *app
+    command: ["python", "-m", "querymesh.agents", "grader"]
+    environment: {<<: *app-env, PUBLIC_URL: "http://grader:8102"}
+  writer:
+    <<: *app
+    command: ["python", "-m", "querymesh.agents", "writer"]
+    environment: {<<: *app-env, PUBLIC_URL: "http://writer:8103"}
+  critic:
+    <<: *app
+    command: ["python", "-m", "querymesh.agents", "critic"]
+    environment: {<<: *app-env, PUBLIC_URL: "http://critic:8104"}
+  scout:
+    <<: *app
+    command: ["python", "-m", "querymesh.agents", "scout"]
+    environment: {<<: *app-env, PUBLIC_URL: "http://scout:8105"}
+  api:
+    <<: *app
+    ports: ["8090:8090"]
+    depends_on: [retriever, grader, writer, critic, scout]
+  gradio:
+    <<: *app
+    command: ["python", "-m", "querymesh.ui_gradio"]
+    ports: ["7860:7860"]
+    environment: {<<: *app-env, API_URL: "http://api:8090"}
+    depends_on: [api]
+  telegram:
+    <<: *app
+    command: ["python", "-m", "querymesh.ui_telegram"]
+    environment: {<<: *app-env, API_URL: "http://api:8090"}
+    depends_on: [api]
+    profiles: ["telegram"]

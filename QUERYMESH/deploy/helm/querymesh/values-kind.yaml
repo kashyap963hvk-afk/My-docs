@@ -1,0 +1,5 @@
+# kind on the Hyperstack VM: images are loaded with "kind load", vLLM is reached on the VM
+env:
+  LLM_BASE_URL: http://172.17.0.1:8000/v1   # the VM itself, as seen from inside Docker/kind
+ingress:
+  enabled: false   # on kind we use kubectl port-forward instead of a load balancer

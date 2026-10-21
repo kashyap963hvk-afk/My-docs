@@ -1,0 +1,102 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: querymesh-api
+  labels: {app: querymesh-api}
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels: {app: querymesh-api}
+  template:
+    metadata:
+      labels: {app: querymesh-api}
+    spec:
+      containers:
+        - name: api
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.api.port }}
+          envFrom:
+            - configMapRef: {name: querymesh-config}
+            - secretRef: {name: {{ .Values.secretName }}}
+          readinessProbe:
+            httpGet: {path: /healthz, port: {{ .Values.api.port }}}
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet: {path: /healthz, port: {{ .Values.api.port }}}
+            initialDelaySeconds: 20
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: querymesh-api
+spec:
+  selector: {app: querymesh-api}
+  ports:
+    - port: 80
+      targetPort: {{ .Values.api.port }}
+{{- if .Values.gradio.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: querymesh-gradio
+  labels: {app: querymesh-gradio}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: querymesh-gradio}
+  template:
+    metadata:
+      labels: {app: querymesh-gradio}
+    spec:
+      containers:
+        - name: gradio
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "-m", "querymesh.ui_gradio"]
+          ports:
+            - containerPort: {{ .Values.gradio.port }}
+          envFrom:
+            - configMapRef: {name: querymesh-config}
+            - secretRef: {name: {{ .Values.secretName }}}
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: querymesh-gradio
+  annotations:
+    alb.ingress.kubernetes.io/healthcheck-path: /   # Gradio has no /healthz page
+spec:
+  selector: {app: querymesh-gradio}
+  ports:
+    - port: 80
+      targetPort: {{ .Values.gradio.port }}
+{{- end }}
+{{- if .Values.telegram.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: querymesh-telegram
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: querymesh-telegram}
+  template:
+    metadata:
+      labels: {app: querymesh-telegram}
+    spec:
+      containers:
+        - name: telegram
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "-m", "querymesh.ui_telegram"]
+          envFrom:
+            - configMapRef: {name: querymesh-config}
+            - secretRef: {name: {{ .Values.secretName }}}
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+{{- end }}

@@ -1,0 +1,8 @@
+# AWS EKS: images come from ECR, secrets from AWS Secrets Manager (ESO), traffic through an ALB.
+# image.repository, ingestImage.repository and env.LLM_BASE_URL are passed with --set.
+image:
+  pullPolicy: Always
+externalSecrets:
+  enabled: true
+ingress:
+  enabled: true

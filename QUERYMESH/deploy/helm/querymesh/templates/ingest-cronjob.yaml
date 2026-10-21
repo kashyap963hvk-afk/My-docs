@@ -1,0 +1,25 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: querymesh-ingest
+spec:
+  schedule: {{ .Values.ingest.schedule | quote }}
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: ingest
+              image: "{{ .Values.ingestImage.repository }}:{{ .Values.ingestImage.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: ["python", "-m", "querymesh.ingest", "--query", {{ .Values.ingest.query | quote }},
+                        "--max-papers", {{ .Values.ingest.maxPapers | quote }}]
+              envFrom:
+                - configMapRef: {name: querymesh-config}
+                - secretRef: {name: {{ .Values.secretName }}}
+              resources:
+                requests: {cpu: 500m, memory: 2Gi}
+                limits: {memory: 6Gi}

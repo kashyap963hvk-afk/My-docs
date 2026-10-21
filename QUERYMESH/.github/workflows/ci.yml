@@ -1,0 +1,63 @@
+# CI/CD: test every push; on main, build both images, push them to ECR and roll out to EKS.
+name: querymesh-ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  id-token: write   # lets the job ask GitHub for an OIDC token (no AWS keys stored in GitHub)
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  CLUSTER: querymesh
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - run: uv venv -p 3.12 && uv pip install -e ".[dev]"
+      - run: uv run pytest -q
+
+  build-and-deploy:
+    if: github.ref == 'refs/heads/main' && vars.AWS_ROLE_ARN != ''
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - uses: docker/setup-buildx-action@v4
+      - name: Build and push the app image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: app
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/querymesh:${{ github.sha }}
+      - name: Build and push the ingest image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: ingest
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/querymesh-ingest:${{ github.sha }}
+      - name: Deploy to EKS with Helm
+        run: |
+          aws eks update-kubeconfig --name "$CLUSTER" --region "$AWS_REGION"
+          helm upgrade --install querymesh deploy/helm/querymesh -n querymesh \
+            -f deploy/helm/querymesh/values-eks.yaml \
+            --reuse-values \
+            --set image.repository=${{ steps.ecr.outputs.registry }}/querymesh \
+            --set image.tag=${{ github.sha }} \
+            --set ingestImage.repository=${{ steps.ecr.outputs.registry }}/querymesh-ingest \
+            --set ingestImage.tag=${{ github.sha }}
+          kubectl -n querymesh rollout status deployment/querymesh-api --timeout=300s
