@@ -1,0 +1,185 @@
+# QUERYMESH - Zero-to-Elite Lab Manual (beginner edition, October 2026)
+Who this is for: a beginner who knows a little Python and wants to build, deploy and explain a production-grade multi-agent RAG system. Every step is one action. Every file is created by you, in a folder you create. Nothing is skipped.
+Assumptions (change anything that is wrong for you): Windows 11 laptop with no usable GPU; goal = the QueryMesh portfolio project exactly as written on your resume, which you can build, show and defend in AI-engineer interviews; budget = pay-as-you-go GPU on Hyperstack (about US$15-25 for the whole manual), free tiers for Jina, Upstash, Logfire, Langfuse, Telegram and GitHub, FakeCloud is free, real AWS is optional (about US$3-6 if you follow the teardown steps the same day).
+## WHERE TO FIND WHAT (read this first)
+This document is split into tabs. Click a tab name in the left panel of Google Docs (Document tabs, under PROJECTS > Querymesh) to open it.
+§ If you are looking for... § Open this tab § Sections
+§ What QueryMesh is, costs, accounts to create, what you install § Querymesh (this tab) § Part 0, Part 1
+§ Hyperstack account, GPU machine, SSH key, VS Code, WinSCP, port forwarding § QM Part 2A - Hyperstack + VS Code + WinSCP § 2A.1 - 2A.14
+§ Project folder, Python, .env secrets, vLLM, OpenSearch, FakeCloud, AWS CLI, Git § QM Part 2B - Project + Tools + FakeCloud § 2B.1 - 2B.14
+§ The ideas behind everything (read before coding) § QM Part 3 - Core Idea § 3.0 - 3.14
+§ arXiv ingestion, Docling, Jina vectors, OpenSearch hybrid search with RRF, Airflow § QM Part 4 - Ingestion + Hybrid Search § 4.0 - 4.9
+§ The five agents, LangGraph supervisor, agentic RAG retry loop, Upstash cache § QM Part 5 - Agentic RAG + Supervisor § 5.0 - 5.10
+§ FastMCP servers over SSE, A2A agent cards and delegation, Logfire, Langfuse, JWT API, Gradio, Telegram § QM Part 6A - MCP + A2A + Tracing + UIs § 6A.0 - 6A.11
+§ Docker, kind, Helm, ECR, Secrets Manager, EKS, ALB, External Secrets, GitHub Actions (FakeCloud and AWS side by side) § QM Part 6B - Docker + EKS + CI/CD § 6B.0 - 6B.16
+§ Measure it like a research lab, tune it, harden it § QM Part 7 - Elite § 7.0 - 7.7
+§ Tools map, maintenance, troubleshooting, projects, cheat sheet, self-test, sources § QM Parts 8-14 - Reference § Parts 8 - 14
+## PROJECT MAP: every line of your resume and where you build it
+Your resume describes QueryMesh in 11 lines. This table shows the exact place in this manual where each line becomes real, working code. When an interviewer asks about a line, open that section.
+§ Resume line § What you build § Tab § Sections
+§ 1. Production-grade arXiv research assistant: multi-agent architecture with LangGraph, FastMCP, A2A, cloud-native deployment § the whole system, end to end § all tabs (overview in Part 3) § 3.0, 3.7, 6B.13
+§ 2. Multi-agent architecture: LangGraph supervisor-worker setup, 5 specialized agents, shared TypedDict state, agent discovery § retriever, grader, writer, critic, scout + a supervisor graph with a shared QueryState; discovery from Agent Cards § Part 5, Part 6A § 5.3, 5.4, 6A.1, 6A.3
+§ 3. Ingestion pipeline: arXiv API, Docling PDF parsing, Airflow DAG scheduling § querymesh/ingest.py and dags/querymesh_ingest.py running daily § Part 4 § 4.3, 4.5, 4.8
+§ 4. Hybrid search engine: OpenSearch BM25, Jina AI vector embeddings, Reciprocal Rank Fusion § querymesh/embeddings.py, querymesh/search.py with an RRF search pipeline § Part 4, Part 7 § 4.1, 4.2, 4.6, 7.3
+§ 5. Advanced agentic RAG: retrieval -> grading -> generation -> retry loops with LangGraph state machines § the supervisor policy: grade, rewrite the query, scout arXiv, regenerate when the critic rejects § Part 5 § 5.4, 5.5, 5.6
+§ 6. FastMCP + A2A communication: all agents expose FastMCP servers with SSE transport and communicate with A2A for peer delegation § querymesh/agents.py: MCP at /mcp/sse, A2A at /a2a, the retriever delegates to the scout § Part 6A § 6A.1 - 6A.4
+§ 7. Observability and monitoring: Logfire span-level tracing, Langfuse Cloud token tracking, latency monitoring, debugging § querymesh/observability.py, Logfire and Langfuse dashboards § Part 5, Part 6A § 5.1, 6A.5, 6A.6
+§ 8. Caching layer: Upstash Redis, SHA256-based exact-match caching for repeated queries § querymesh/cache.py used by the API § Part 5, Part 6A § 5.8, 5.9, 6A.7
+§ 9. User interfaces: Telegram bot and Gradio web UI with streaming § querymesh/ui_gradio.py and querymesh/ui_telegram.py streaming agent steps § Part 6A § 6A.9, 6A.10
+§ 10. Production deployment: AWS EKS with Helm charts, ALB Ingress, Secrets Operator § Helm chart deploy/helm/querymesh, ALB controller, External Secrets Operator § Part 6B § 6B.7 - 6B.13
+§ 11. CI/CD and security: GitHub Actions, containerized images, JWT authentication, secret management § .github/workflows/ci.yml, Dockerfile, querymesh/auth.py, AWS Secrets Manager § Part 6A, Part 6B § 6A.7, 6B.1, 6B.6, 6B.9, 6B.14
+How every practical section is written:
+§ Label § Meaning
+§ WHERE: § the exact place you do the work (which app, which window, which folder)
+§ GOAL: § what this section achieves, in one line
+§ Step 1. Step 2. ... § one action per step; do them in order
+§ grey box § text you type or paste EXACTLY (never type a prompt sign such as $ or PS C:\>)
+§ You should see: § what appears if the step worked
+§ Watch out: § the mistake beginners make here, and how to avoid it
+§ CHECKPOINT: § what must be true before you continue; If not: the fix
+§ Real AWS (same step) column, light blue § the same cloud step on real AWS; the white column next to it is FakeCloud (free practice)
+§ CAPITAL_NAMES § placeholders: replace them with your own value (a table always tells you with what)
+Golden rules: (1) never skip a CHECKPOINT; (2) if a step fails, stop and fix it before the next step; (3) read the "BEFORE YOU START" box of every part before typing anything; (4) when you stop working, HIBERNATE the Hyperstack VM (Section 2A.13).
+What was tested while writing this manual: the supervisor routing tests, the API and JWT tests and the chunker tests pass (10 passed); the five agents ran as real servers, the supervisor reached them over MCP with SSE, found them through their A2A Agent Cards, and the retriever delegated work to the scout over A2A; the LLM skills parsed structured output from an OpenAI-compatible server. The steps that need the GPU or outside services (vLLM, OpenSearch, Jina, arXiv, Docker builds, kind, EKS) are written from the official documentation and marked (verify) where a value can change.
+# PART 0 - Start Here
+## 0.1 What QueryMesh is (in plain words)
+QueryMesh is your own research assistant for arXiv, the website where scientists publish AI papers every day. You ask a question such as "How does reciprocal rank fusion combine keyword and vector search?" and QueryMesh answers in plain English, with numbered citations [1] [2] that link to the exact papers it used.
+Behind the answer, a team of five small AI agents works together: a Retriever finds passages, a Grader throws away the useless ones, a Writer drafts a cited answer, a Critic checks every claim against the passages, and a Scout fetches brand-new papers from arXiv when the library has nothing good. A Supervisor decides who works next and retries when something is weak. Every night an Airflow job downloads new papers, Docling reads the PDFs, and OpenSearch stores them for hybrid search (keywords + meaning).
+Why people build systems like this: a plain chatbot invents facts and knows nothing after its training date. Retrieval-augmented generation (RAG) gives the model fresh, checkable sources. Agentic RAG adds judgement: grade, retry, verify. Real-world use: research copilots (Elicit, Consensus, Semantic Scholar), internal company search assistants, legal and medical literature review, customer-support bots that must cite the manual.
+## 0.2 The whole journey in one picture
+laptop (VS Code + WinSCP) --SSH--> Hyperstack GPU computer --> vLLM serves Qwen3-4B --> arXiv API + Docling + Jina --> OpenSearch (BM25 + vectors + RRF) --> five agents + LangGraph supervisor --> Upstash cache --> FastMCP (SSE) + A2A between agents --> Logfire + Langfuse traces --> FastAPI with JWT --> Gradio web chat + Telegram bot --> Docker images --> FakeCloud + kind (free practice) --> real AWS ECR + EKS + ALB + Secrets Manager (optional) --> GitHub Actions CI/CD --> tear down.
+§ Part § What you will do § Time estimate
+§ 0 Start Here § understand the project, tools and costs § 20 min
+§ 1 Prerequisites § check your skills, create accounts § 1 h
+§ 2A Hyperstack + connection § GPU machine, SSH key, VS Code, WinSCP, port forwarding § 1-2 h
+§ 2B Project + tools § folders, Python, secrets, vLLM, OpenSearch, FakeCloud, AWS CLI, Git § 2 h
+§ 3 Core Idea § the ideas behind every step § 45 min
+§ 4 Basics § ingest arXiv papers, hybrid search, Airflow schedule § 3-4 h
+§ 5 Intermediate § five agents, supervisor graph, agentic retry loop, cache § 3-4 h
+§ 6A Advanced § MCP + A2A agent servers, tracing, JWT API, Gradio, Telegram § 4-5 h
+§ 6B Advanced § Docker, kind, Helm, FakeCloud and AWS EKS, CI/CD, teardown § 5-6 h (+ about US$3-6 on AWS)
+§ 7 Elite § measure retrieval and answers like a lab, tune, harden § 3-4 h
+§ 8-14 Reference § tools, maintenance, troubleshooting, projects, cheat sheet, self-test, sources § reference
+## 0.3 What you will be able to do at the end
+- Build an ingestion pipeline: arXiv API -> PDF -> Docling Markdown -> chunks -> Jina vectors -> OpenSearch, scheduled daily by Airflow.
+- Run and explain hybrid search: BM25 keywords plus vector meaning, merged with Reciprocal Rank Fusion, and prove with numbers that it beats each method alone.
+- Build a LangGraph supervisor-worker system with five agents, a shared TypedDict state and an agentic RAG loop (retrieve, grade, rewrite, scout, write, critique, retry).
+- Expose every agent as a FastMCP server over SSE and as an A2A agent with an Agent Card, so agents discover each other and delegate work.
+- Trace every call with Logfire spans and every token with Langfuse, cache repeated questions in Upstash Redis, and protect the API with JWT.
+- Package everything in Docker, deploy it with Helm on kind (free) and on AWS EKS behind an ALB with secrets from AWS Secrets Manager, ship it with GitHub Actions, and delete it all so the bill stops.
+## 0.4 Every place you will work
+§ Place § What it is § What you do there
+§ Your laptop: PowerShell § the Windows terminal § create the SSH key, first SSH login
+§ Your laptop: VS Code + Remote-SSH § code editor connected to the GPU computer § create every folder and file, run every command, forward ports
+§ Your laptop: WinSCP § drag-and-drop file transfer § copy files between laptop and GPU computer
+§ Your laptop: web browser § websites § Hyperstack console, Jina, Upstash, Logfire, Langfuse, GitHub, AWS console; Airflow and Gradio through forwarded ports
+§ Your phone or laptop: Telegram app § chat app § create the bot with @BotFather, chat with QueryMesh
+§ Hyperstack GPU computer (Ubuntu 24.04 + NVIDIA RTX A6000 48 GB) § a computer you rent per hour § vLLM, OpenSearch, Airflow, the agents, Docker, FakeCloud, kind
+§ FakeCloud (on the GPU computer, port 4566) § free copy of AWS for practice § practise every AWS command at no cost
+§ kind (on the GPU computer) § a real Kubernetes cluster made of Docker containers § practise Helm and Kubernetes for free
+§ Real AWS (region us-east-1) § Amazon's cloud § ECR, Secrets Manager, IAM, EKS, ALB, S3
+§ GitHub § code hosting + GitHub Actions § store your code, run tests, build and deploy automatically
+§ Jina AI, Upstash, Logfire, Langfuse § online services with free tiers § embeddings, cache, traces, token tracking
+One-line flow: you type in VS Code on the laptop -> SSH -> GPU computer runs everything -> question from Gradio/Telegram -> API (JWT, cache) -> supervisor -> agents (MCP/A2A) -> OpenSearch + Jina + vLLM -> cited answer back; traces go to Logfire and Langfuse; Docker images go to FakeCloud/kind for practice and to AWS ECR/EKS for real.
+## 0.5 What each piece does
+§ Component § Its job
+§ Qwen3-4B-Instruct-2507 § the language model that grades, writes and checks (Apache-2.0 licence, no thinking mode) [22]
+§ vLLM § a fast model server with an OpenAI-compatible API on port 8000 [21]
+§ arXiv API + arxiv Python package § finds the newest papers by topic (max 1 request every 3 seconds) [10][11]
+§ Docling § reads a PDF's layout and turns it into clean Markdown [12]
+§ Jina AI embeddings § turns text into 1024 numbers (a vector) that capture its meaning [17][18]
+§ OpenSearch § stores chunks; does BM25 keyword search, vector (k-NN) search and the hybrid query [14][16]
+§ Reciprocal Rank Fusion (RRF) § merges two ranked lists by rank, not by score [15][19]
+§ Apache Airflow § runs the ingestion every night at 02:00 and retries failures [13]
+§ LangGraph § builds the supervisor-worker state machine with a shared TypedDict state [20]
+§ FastMCP § turns each agent's function into an MCP tool served over SSE [23][24]
+§ A2A protocol (a2a-sdk) § Agent Cards for discovery, and agent-to-agent task delegation [25]
+§ Upstash Redis § a hosted Redis that caches answers by the SHA-256 of the question [28]
+§ Pydantic Logfire § span-level tracing: which agent ran, how long, what failed [26]
+§ Langfuse Cloud § LLM tracing: prompts, answers, token counts, latency [27]
+§ FastAPI + PyJWT § the API with login (POST /token) and protected endpoints [31]
+§ Gradio, python-telegram-bot § the web chat and the Telegram bot, both streaming the agents' steps [29][30]
+§ Docker, kind, Helm § images, a local Kubernetes cluster, and the package manager for Kubernetes [32][34]
+§ FakeCloud § free local AWS emulator: same aws commands, address http://localhost:4566 [6]
+§ AWS ECR, Secrets Manager, IAM, EKS, ALB, S3 § image registry, secret safe, permissions, managed Kubernetes, load balancer, file storage
+§ AWS Load Balancer Controller, External Secrets Operator § create the ALB from an Ingress; copy secrets from AWS into Kubernetes [38][39]
+§ GitHub Actions § tests every push; builds images, pushes to ECR and deploys to EKS on main [40]
+## 0.6 What it costs
+§ Item § Price (October 2026) § How much you need § Approx. cost
+§ Hyperstack 1x RTX A6000 48 GB (n3-RTX-A6000x1) § about US$0.50 per hour [1] (verify on the pricing page) § about 25-35 hours in total § US$13-18
+§ Hyperstack storage while hibernated § cents per day (root disk + optional kept IP) [3] § a few days § under US$2
+§ Jina AI embeddings § free: 10 million tokens per new key [17] § about 2-5 million tokens § US$0
+§ Upstash Redis § free: 1 database, 250 MB, 500K commands per month [28] § always § US$0
+§ Pydantic Logfire § free Personal plan: 10 million spans/logs/metrics per month [26] § always § US$0
+§ Langfuse Cloud § free Hobby plan: 50k units per month, 30 days of data [27] § always § US$0
+§ Telegram, GitHub § free § always § US$0
+§ FakeCloud, kind § free and open source [6][32] § always § US$0
+§ AWS EKS control plane § US$0.10 per hour [36] § 3-4 hours § about US$0.40
+§ AWS 2x t3.large nodes + 1 NAT gateway + 1 ALB § US$0.0832/h each + US$0.045/h + US$0.0225/h, plus small data charges [41] § 3-4 hours § about US$1.50
+§ AWS Secrets Manager, ECR, S3 § US$0.40 per secret per month, US$0.10 per GB-month [41] § Part 6B § under US$1
+Watch out: Hyperstack keeps billing a machine that is only "stopped" (SHUTOFF). Only HIBERNATED or deleted machines stop the GPU bill [3]. Section 2A.13 shows how. On AWS, the EKS cluster, nodes, NAT gateway and ALB bill every hour until you run the teardown in Section 6B.15.
+# PART 1 - Prerequisites
+## 1.1 Checklist
+§ Item § MUST or NICE-TO-HAVE
+§ Python basics: variables, lists, dicts, functions, f-strings, reading an error message § MUST
+§ JSON: objects, arrays, double-quoted strings § MUST
+§ Terminal basics: cd, ls, pwd, cat, mkdir § MUST
+§ Environment variables: export NAME=value, echo $NAME § MUST
+§ HTTP APIs: URL, GET/POST, JSON body, status codes § MUST
+§ async / await in Python § NICE-TO-HAVE (explained where it is used, Part 5)
+§ What an LLM, an embedding and RAG are § NICE-TO-HAVE (taught in Part 3)
+§ Git basics § NICE-TO-HAVE (every command is given)
+§ Docker and Kubernetes basics § NICE-TO-HAVE (taught in Part 6B)
+§ AWS basics § NICE-TO-HAVE (every click and command is given)
+## 1.2 Refreshers and 1-minute checks
+Python. A dict maps keys to values; a list keeps order; a function returns a value. Check: what does this print?
+```
+paper = {"title": "RRF", "authors": ["Cormack", "Clarke"]}
+print(len(paper["authors"]), paper.get("year", "unknown"))
+```
+Answer: 2 unknown
+JSON. Text format: {} objects, [] arrays, strings MUST use double quotes. APIs send and receive JSON. Check: which line is NOT valid JSON?
+```
+{"question": "What is RAG?", "k": 5}
+{'question': 'What is RAG?', 'k': 5}
+```
+Answer: the second (single quotes are Python, not JSON).
+Terminal. pwd = where am I; ls = list files; cd folder = go into folder; cd .. = go up one folder; mkdir -p a/b = make folders; cat file = print a file. Check: after mkdir -p test/one and ls test you should see one.
+Environment variables. A named value that every program started from this terminal can read. QueryMesh reads all its settings (keys, addresses) this way, from a file called .env. Check: type the two lines below in any Linux terminal; the second prints hello.
+```
+export GREETING=hello
+echo $GREETING
+```
+HTTP APIs. A client sends a request (method, URL, JSON body); the server answers with a status code (200 OK, 401 not logged in, 422 invalid input, 500 server error) and JSON. Check: which code does QueryMesh return when you call /ask without a login token? Answer: 401.
+## 1.3 Accounts to create now
+Create these accounts before Part 2. Write every key you get into a private Notepad file on your laptop named secrets.txt (never into a chat, an e-mail or Git).
+§ What § Where § Cost § Which option § Used in
+§ Hyperstack account § https://console.hyperstack.cloud § pay as you go § add US$20-30 credit § Section 2A.3
+§ Jina AI API key § https://jina.ai/embeddings § free 10M tokens § the free key shown on the page (no card) § Section 2B.8
+§ Upstash account § https://console.upstash.com § free § Free plan, 1 Redis database § Section 5.8
+§ Pydantic Logfire account § https://logfire.pydantic.dev § free § Personal plan § Section 6A.5
+§ Langfuse Cloud account § https://cloud.langfuse.com § free § Hobby plan (EU region) § Section 6A.6
+§ Telegram account § Telegram app on your phone or desktop § free § normal account § Section 6A.10
+§ GitHub account § https://github.com/signup § free § Free plan § Section 2B.13
+§ AWS account (optional, blue column) § https://aws.amazon.com § pay as you go § region us-east-1, set a US$10 budget alert § Section 2B.12
+Jina AI key in detail (you need it first):
+Step 1. Open https://jina.ai/embeddings in your browser.
+Step 2. Scroll down to the API box on the page (it shows a key that starts with jina_).
+Step 3. Click the copy icon next to the key (verify: the page layout changes often; the key may also be under "API Key & Billing").
+Step 4. Paste it into secrets.txt as JINA_API_KEY = jina_...
+Watch out: that free key holds 10 million tokens. Ingesting 20 full papers uses roughly 0.5-1 million tokens. Do not re-run ingestion in a loop.
+Watch out: you do NOT need a Hugging Face account: Qwen3-4B-Instruct-2507 is Apache-2.0 and downloads without a licence form [22].
+CHECKPOINT: you can log in to Hyperstack, and secrets.txt contains your Jina key.
+## 1.4 What you install where
+§ Where § What § Section
+§ Laptop § VS Code + Microsoft "Remote - SSH" extension § 2A.1, 2A.2
+§ Laptop § WinSCP § 2A.11
+§ Laptop § nothing else (PowerShell and OpenSSH come with Windows 11) § 2A.4
+§ GPU computer § tmux, git, jq, unzip § 2B.4
+§ GPU computer § uv and Python 3.12, the QueryMesh packages § 2B.5 - 2B.7
+§ GPU computer § vLLM and OpenSearch (as Docker containers) § 2B.10, 2B.11
+§ GPU computer § AWS CLI v2 and FakeCloud § 2B.12
+§ GPU computer § Apache Airflow (its own environment) § 4.8
+§ GPU computer § kind, kubectl, Helm (and eksctl for the blue column) § 6B.3, 6B.7
+Why everything runs on the GPU computer: your laptop only edits and views. The GPU computer has Linux, Docker, the GPU and a fast internet connection, so commands behave exactly as written here. You will never install Python or Docker on Windows.
+CHECKPOINT: you understand the table above. Continue with the tab QM Part 2A - Hyperstack + VS Code + WinSCP.

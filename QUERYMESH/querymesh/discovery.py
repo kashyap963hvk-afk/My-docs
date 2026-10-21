@@ -2,7 +2,7 @@
 import json
 
 import httpx
-from a2a.client import A2ACardResolver, ClientConfig, create_client
+from a2a.client import A2ACardResolver, AgentCardResolutionError, ClientConfig, create_client
 from a2a.helpers import new_text_message
 from a2a.types import Role, SendMessageRequest
 
@@ -28,7 +28,7 @@ async def find_peer(base_urls: list[str], skill_id: str) -> str | None:
     for base_url in base_urls:
         try:
             card = await fetch_card(base_url)
-        except httpx.HTTPError:
+        except AgentCardResolutionError:  # that agent is down or not an A2A agent: skip it
             continue
         if any(skill.id == skill_id for skill in card.skills):
             return base_url

@@ -1,0 +1,429 @@
+# PART 5 - INTERMEDIATE: Agentic RAG, the supervisor and its five agents, and the answer cache
+This part builds three lines of the QueryMesh project: (2) the LangGraph supervisor-worker setup with 5 specialised agents and a shared TypedDict state, (5) agentic RAG: retrieval, then grading, then generation, with retry loops, and (8) the Upstash Redis exact-match cache keyed by SHA-256.
+You start from the result of Part 4: OpenSearch on the VM holds arXiv chunks, and `python -m querymesh.search "..."` returns hybrid results. vLLM from Section 2B.10 is still running on port 8000.
+## BEFORE YOU START: the words of this part
+§ Word § Plain meaning
+§ LLM § large language model: the program that reads a prompt and writes text. Ours is Qwen3-4B-Instruct-2507, served by vLLM on the GPU
+§ prompt § the text we send to the LLM: instructions + the question + the passages
+§ agent § a small worker with ONE job and its own prompt (retrieve, grade, write, check, scout)
+§ skill § the Python function that does an agent's job. In this part each skill runs inside one Python process; in Part 6A each agent becomes its own server
+§ supervisor § the boss node. It reads the shared notebook and decides which agent works next, or that the work is finished
+§ state § the shared notebook: a Python dictionary every agent can read and add to
+§ TypedDict § a Python way to say "this dictionary has exactly these keys, of these types"
+§ node § one box in the graph: a function that receives the state and returns changes to it
+§ edge § an arrow between two nodes: "after this box, go to that box"
+§ Command § what our supervisor returns: "go to node X, and also write these values into the notebook"
+§ structured output § forcing the LLM to answer as JSON that fits a given shape, for example {"relevant": [1, 3]}
+§ grounded § every claim in the answer is supported by the passages (no hallucination)
+§ cache § a fast memory of earlier answers, so the same question is not computed twice
+§ SHA-256 § a function that turns any text into a fixed 64-character fingerprint. The same text always gives the same fingerprint
+§ TTL § time to live: how many seconds a cached answer is kept before it disappears
+
+The plan of this part:
+5.1 to 5.4  create four files: observability.py, llm.py, skills.py, graph.py
+5.5 to 5.7  run the graph, watch the retry loop, and prove the routing with tests
+5.8 to 5.9  create the Upstash database and the cache, and prove it works
+## SECTION 5.0 - What, why, when
+**What:** a team of five agents, led by a supervisor, that turns a question into a cited, fact-checked answer. The supervisor follows a loop: retrieve passages, grade them, retry with a better query (or fetch fresh papers) if too few are relevant, write the answer, check it, and rewrite it if the check fails.
+**Why:** plain RAG (search once, then write) fails silently when the search finds the wrong passages or when the model invents a fact. The grading step and the checking step catch both problems, and the loop gives the system a second chance.
+**When:** use agentic RAG when answer quality matters more than speed. Each extra loop costs one or two more LLM calls (a few seconds on our GPU).
+**The cache:** research questions repeat. When two users ask the same question, the second one gets the stored answer in milliseconds, and the GPU does no work.
+## SECTION 5.1 - Create querymesh/observability.py
+WHERE: VS Code (connected to the VM), Explorer panel, folder `querymesh`
+GOAL: one small file that switches tracing on. llm.py (next section) needs it. Part 6A connects it to the Logfire and Langfuse websites; until then it does nothing and causes no errors.
+Step 1. In the Explorer, right-click the folder `querymesh`.
+Step 2. Click **New File...**.
+Step 3. Type `observability.py` and press Enter.
+Step 4. Paste the grey box below into the empty file.
+Step 5. Press Ctrl+S to save.
+@code querymesh/observability.py
+§ Line(s) § What it does (plain English)
+§ `import logfire` § loads Logfire, the tracing library from the makers of Pydantic. Tracing = recording which function called which, and how long each took
+§ `_configured = False` § a flag that remembers whether setup already ran in this process. The underscore means "private to this file"
+§ `def setup(service_name, app=None)` § every program (API, each agent, the web UI) calls this once at start. `service_name` is the label you will see in the Logfire website, e.g. querymesh-api
+§ `global _configured` § lets the function change the flag defined outside it
+§ `logfire.configure(service_name=..., send_to_logfire="if-token-present", console=False)` § starts Logfire. `if-token-present` means: if LOGFIRE_TOKEN is in .env, send the traces to the website; if it is empty, record nothing and show no error. `console=False` keeps traces out of your terminal
+§ `logfire.instrument_httpx()` § every outgoing web call made with the httpx library (Jina, the agents, the API client) becomes a timed span automatically
+§ comment about MCP § the MCP library version 2 already reports its own tool calls to OpenTelemetry (the standard Logfire uses), so we add nothing for it
+§ `if app is not None: logfire.instrument_fastapi(app)` § when the caller passes the FastAPI app (only api.py does), every incoming request becomes a span too
+§ `def langfuse_callbacks()` § returns a list with one Langfuse "callback" (a listener that LangChain informs about every LLM call: prompt, answer, token counts)
+§ `if not os.getenv("LANGFUSE_PUBLIC_KEY"): return []` § no Langfuse key in .env = return an empty list = no tracing, no error
+§ `from langfuse.langchain import CallbackHandler` § imported only when needed, so the program starts fast when Langfuse is off
+
+CHECKPOINT: the Explorer shows `querymesh/observability.py`, and the tab title has no white dot (a white dot means "not saved").
+If not: click the file tab and press Ctrl+S.
+## SECTION 5.2 - Create querymesh/llm.py and talk to the model once
+WHERE: VS Code Explorer, folder `querymesh`, then the VS Code Terminal (folder `~/querymesh`, venv active)
+GOAL: one function, get_llm(), that every agent uses to reach vLLM, and a first answer from the model.
+Step 1. Right-click the folder `querymesh`.
+Step 2. Click **New File...**.
+Step 3. Type `llm.py` and press Enter.
+Step 4. Paste the grey box below.
+Step 5. Press Ctrl+S.
+@code querymesh/llm.py
+§ Line(s) § What it does (plain English)
+§ `from langchain_openai import ChatOpenAI` § LangChain's client for any server that speaks the OpenAI chat API. vLLM speaks that API, so we can use it even though nothing here comes from OpenAI
+§ `def get_llm(temperature=0.0)` § builds a ready-to-use model client. Temperature 0 = always pick the most likely words (stable answers for grading and checking); higher = more varied wording
+§ `base_url=config.LLM_BASE_URL` § where vLLM listens: http://localhost:8000/v1 from .env
+§ `api_key=config.LLM_API_KEY` § the password you gave vLLM with --api-key in Section 2B.10. Without it vLLM answers 401
+§ `model=config.LLM_MODEL` § the name vLLM serves the model under: qwen3-4b (set by --served-model-name)
+§ `max_tokens=1024` § the answer may be at most about 750 words; stops runaway answers
+§ `timeout=120` § give up after 2 minutes instead of hanging forever
+§ `callbacks=langfuse_callbacks()` § attaches the Langfuse listener when it is configured (Part 6A), otherwise an empty list
+§ `if __name__ == "__main__":` § the lines below run only when you start this file directly (python -m querymesh.llm), not when another file imports it
+§ `get_llm().invoke("...").content` § sends one question and prints only the text of the answer
+
+Step 6. Click the Terminal panel (if it is hidden: menu **Terminal > New Terminal**).
+Step 7. Make sure you are in the project with the venv active:
+```
+cd ~/querymesh && source .venv/bin/activate
+```
+Step 8. Check that vLLM is up (it can take 2-4 minutes after a VM restart):
+```
+curl -s localhost:8000/v1/models -H "Authorization: Bearer $(grep ^LLM_API_KEY .env | cut -d= -f2)" | jq -r '.data[0].id'
+```
+You should see: qwen3-4b
+Step 9. Ask the model one question through llm.py:
+```
+python -m querymesh.llm
+```
+You should see: one sentence such as "arXiv is a free online repository of research papers...". The exact words differ every time.
+§ If you see... § It means... § Do this next
+§ Connection refused / ConnectError § vLLM is not running or still loading § run `docker logs --tail 20 vllm`; wait for "Application startup complete"; if the container is missing run `bash scripts/start_vllm.sh`
+§ 401 Unauthorized § LLM_API_KEY in .env is not the key vLLM was started with § run `bash scripts/start_vllm.sh` again (it reads the key from .env)
+§ 404 model qwen3-4b does not exist § LLM_MODEL in .env differs from --served-model-name § set `LLM_MODEL=qwen3-4b` in .env
+§ ModuleNotFoundError: querymesh § the venv is not active or you are not in ~/querymesh § repeat Step 7
+
+CHECKPOINT: `python -m querymesh.llm` prints a sentence about arXiv.
+If not: use the table above; the most common cause is that vLLM is still loading the model.
+## SECTION 5.3 - Create querymesh/skills.py (the brains of the five agents)
+WHERE: VS Code Explorer, folder `querymesh`
+GOAL: five plain Python functions, one per agent, plus the query rewriter the supervisor uses. Each can be tested alone.
+Step 1. Right-click the folder `querymesh`.
+Step 2. Click **New File...**.
+Step 3. Type `skills.py` and press Enter.
+Step 4. Paste the grey box below.
+Step 5. Press Ctrl+S.
+@code querymesh/skills.py
+§ Line(s) § What it does (plain English)
+§ `from pydantic import BaseModel, Field` § Pydantic describes the exact JSON shape we want back from the LLM
+§ `def numbered(chunks)` § turns a list of chunks into text the LLM can read: "[1] (2510.01234) Title" then the chunk text. The numbers are how the LLM refers to passages
+§ `c['text'][:1200]` § only the first 1,200 characters of each chunk, so 8 chunks fit easily in the prompt
+§ `def retrieve(query, k=config.TOP_K)` § agent 1, the Retriever: runs the hybrid search from Part 4 and returns the best k chunks (k = 8 from .env)
+§ `class GradeResult(BaseModel): relevant: list[int]` § the JSON shape the Grader must return: a list of passage numbers, e.g. {"relevant": [1, 4]}
+§ `Field(description=...)` § this description is sent to the LLM as part of the JSON schema, so it knows what the numbers mean
+§ `def grade(question, chunks)` § agent 2, the Grader: keeps only the chunks that help answer the question
+§ `if not chunks: return []` § nothing to grade = no LLM call
+§ `get_llm().with_structured_output(GradeResult).invoke(prompt)` § asks vLLM to answer ONLY with JSON that fits GradeResult (vLLM enforces the schema while it writes), and turns that JSON into a Python object
+§ `keep = {n for n in result.relevant if 1 <= n <= len(chunks)}` § ignore any number the model invented that is not a real passage number
+§ `return [c for n, c in enumerate(chunks, start=1) if n in keep]` § return the kept chunks in their original order
+§ `def write(question, chunks, feedback="")` § agent 3, the Writer: writes the answer and must cite passages as [1], [2]
+§ "Answer the question using ONLY the passages below" § the core RAG instruction: stay inside the evidence
+§ `if feedback:` § on a second attempt the Critic's complaint is added, so the Writer fixes exactly that
+§ `get_llm(temperature=0.2)` § a little variety makes the writing read naturally
+§ `re.findall(r"\[(\d+)\]", answer)` § finds every [number] in the answer
+§ `cited = sorted({...})` § the set removes duplicates; sorted puts them in order; out-of-range numbers are dropped
+§ `citations = [{"n": n, "paper_id": ..., "title": ..., "url": ...}]` § the source list shown under the answer, built from OUR data (never from model text, so the links are real)
+§ `class Verdict(BaseModel)` § the Critic's JSON shape: grounded true/false plus feedback
+§ `def critic(question, answer, chunks)` § agent 4, the Critic: a strict fact checker that compares the answer with the passages
+§ `.model_dump()` § turns the Pydantic object into a normal dictionary {"grounded": ..., "feedback": ...}
+§ `STOPWORDS = {...}` § common question words that make poor arXiv search terms
+§ `def topic_to_arxiv_query(topic)` § turns "What is reciprocal rank fusion?" into "all:reciprocal AND all:rank AND all:fusion" (arXiv search syntax; all: means any field)
+§ `len(w) > 3 and w not in STOPWORDS` § keep words longer than 3 letters that are not stop words
+§ `words[:4]` § at most 4 words, so the arXiv search does not become too narrow
+§ `or "cat:cs.CL"` § if no word is left, fall back to the computational linguistics category
+§ `def scout(topic, max_papers=5)` § agent 5, the Scout: asks arXiv for fresh papers right now and indexes their abstracts (fast, no PDF parsing). The nightly Airflow job adds full texts
+§ `def rewrite_query(question, previous_query)` § not an agent: the supervisor uses it to write a better search query after a poor search
+§ `.strip().strip('"')[:300]` § remove spaces, surrounding quotes, and cut to 300 characters
+
+Step 6. In the Terminal, try the Retriever skill:
+```
+python -c "from querymesh import skills; print([c['paper_id'] for c in skills.retrieve('retrieval augmented generation', 5)])"
+```
+You should see: a list of 5 arXiv ids such as ['2510.01234', '2510.01234', '2509.09876', ...]. The same id can appear twice: two chunks of one paper.
+Step 7. Try the Grader skill on those chunks:
+```
+python -c "from querymesh import skills; q='How does retrieval augmented generation reduce hallucination?'; c=skills.retrieve(q, 5); print(len(c), '->', len(skills.grade(q, c)))"
+```
+You should see: something like 5 -> 3 (5 chunks in, 3 judged relevant). Any number from 0 to 5 is possible.
+Step 8. Try the Writer and the Critic together:
+```
+python -c "from querymesh import skills; q='How does retrieval augmented generation reduce hallucination?'; c=skills.grade(q, skills.retrieve(q, 5)); w=skills.write(q, c); print(w['answer']); print(skills.critic(q, w['answer'], c))"
+```
+You should see: a short answer with [1] style citations, then a line like {'grounded': True, 'feedback': ''}.
+Step 9. Try the Scout skill (it calls arXiv, so it waits about 3 seconds):
+```
+python -c "from querymesh import skills; print(skills.topic_to_arxiv_query('What is speculative decoding?')); print(skills.scout('speculative decoding', 2))"
+```
+You should see: all:speculative AND all:decoding, then {'added': ['2510.xxxxx', '2510.yyyyy']}. If both papers were already indexed you see {'added': []}.
+Watch out: the Grader returning 0 is not an error. It means your index has nothing on that question yet; the supervisor in Section 5.4 handles exactly this case.
+§ If you see... § It means... § Do this next
+§ JINA_API_KEY is empty § .env has no Jina key § fill JINA_API_KEY in .env (Section 2B.8)
+§ index_not_found_exception § no index yet § run Part 4 (Sections 4.2 and 4.5)
+§ BadRequestError ... response_format § the server does not accept JSON schema output § make sure LLM_BASE_URL points to vLLM (it supports it), not to another server
+§ ValidationError for GradeResult § the model returned broken JSON (rare with vLLM) § run the step again
+
+CHECKPOINT: Steps 6 to 9 each print a result without a Traceback.
+If not: read the last line of the error and use the table above.
+## SECTION 5.4 - Create querymesh/graph.py (the supervisor, the shared state, the loop)
+WHERE: VS Code Explorer, folder `querymesh`
+GOAL: the LangGraph state machine: one supervisor routes the question through the five agents, with retry loops, until the answer is grounded or the limits are reached.
+Step 1. Right-click the folder `querymesh`.
+Step 2. Click **New File...**.
+Step 3. Type `graph.py` and press Enter.
+Step 4. Paste the grey box below.
+Step 5. Press Ctrl+S.
+@code querymesh/graph.py
+§ Line(s) § What it does (plain English)
+§ `import operator` § gives us operator.add, the "+" for lists, used to merge the steps lists
+§ `from typing import Annotated, TypedDict` § Python tools to describe the shape of the shared notebook
+§ `import logfire` § to time every agent call (visible in Part 6A)
+§ `from langgraph.graph import END, START, StateGraph` § StateGraph builds the graph; START is the entry point; END means "finished"
+§ `from langgraph.types import Command` § the object the supervisor returns: where to go next + what to write
+§ `class QueryState(TypedDict, total=False)` § THE shared TypedDict state. `total=False` = keys may be missing at the start (only question is given)
+§ `question: str` § the user's original question, never changed
+§ `search_query: str` § the text actually searched; the supervisor may rewrite it
+§ `chunks: list[dict]` § what the Retriever found
+§ `relevant: list[dict] or None` § what the Grader kept. None means "not graded yet"
+§ `answer: str or None` § the Writer's answer. None means "no answer yet"
+§ `citations: list[dict]` § the sources of the answer
+§ `grounded: bool or None` § the Critic's verdict. None means "not checked yet"
+§ `feedback: str` § the Critic's complaint, passed back to the Writer
+§ `retrieval_attempts`, `generation_attempts` § counters that stop endless loops
+§ `scouted: bool` § True after the Scout has fetched fresh papers once
+§ `steps: Annotated[list[str], operator.add]` § a reducer: when a node returns steps, LangGraph ADDS them to the existing list instead of replacing it. This gives the progress log the UI shows
+§ `LOCAL_SKILLS = {...}` § a phone book: skill name -> Python function (used in local mode)
+§ `_registry: dict[str, str] = {}` § the phone book for remote mode (Part 6A): skill name -> MCP address, filled by agent discovery
+§ `async def call_skill(name, **kwargs)` § the ONE place where the supervisor reaches an agent. `**kwargs` = the named arguments, e.g. query=..., k=...
+§ `with logfire.span("agent call {name}", ...)` § records one timed span per agent call
+§ `if config.WORKER_MODE == "local":` § local mode (this part): call the function in this process
+§ `await asyncio.to_thread(LOCAL_SKILLS[name], **kwargs)` § runs the normal (blocking) function in a helper thread, so the async graph keeps working
+§ `from fastmcp import Client` ... `call_tool(name, kwargs)` § remote mode (Part 6A): call the agent's MCP tool over SSE
+§ `_registry.update(await discover_agents(config.AGENT_URLS))` § the first remote call reads every agent's Agent Card to learn who offers which skill
+§ `result.data if result.data is not None else json.loads(...)` § FastMCP returns the tool result already decoded in .data; the fallback decodes the raw text
+§ `def supervisor(state)` § the boss. It never does the work; it only reads the notebook and decides (decision table below)
+§ `return Command(goto="retriever", update={"search_query": state["question"]})` § first visit: search for the question itself
+§ `len(state["relevant"]) >= config.MIN_RELEVANT` § enough relevant passages (2 by default) = go and write
+§ `skills.rewrite_query(...)` and `"steps": [...]` § retry: write a better query and log the reason
+§ `return Command(goto=END)` § finished: the graph stops and returns the notebook
+§ `async def retriever(state)` § worker node: calls the Retriever, stores chunks, resets relevant to None (new chunks must be graded again), adds 1 to retrieval_attempts
+§ `async def grader(state)` § worker node: stores the relevant chunks and logs "x of y"
+§ `chunks = state.get("relevant") or state.get("chunks", [])` § the Writer uses the relevant chunks; if there are none it uses all chunks and says what is missing
+§ `"grounded": None` in writer § a new answer must be checked again
+§ `async def critic(state)` § worker node: stores grounded and feedback
+§ `async def scout(state)` § worker node: fetches fresh papers, then sets retrieval_attempts back to 0 and empties chunks, so the supervisor starts a fresh search
+§ `builder = StateGraph(QueryState)` § a new graph whose notebook has the QueryState shape
+§ `builder.add_node("supervisor", supervisor, destinations=(...))` § adds the supervisor box; destinations lists where its Command may go (used to draw the graph)
+§ `builder.add_edge(name, "supervisor")` § every worker reports back to the supervisor: this is the supervisor-worker pattern
+§ `builder.add_edge(START, "supervisor")` § the graph always starts at the supervisor
+§ `builder.compile()` § checks the graph and turns it into a runnable object
+§ `graph = build_graph()` § built once when the file is imported
+§ `async def stream_answer(question)` § runs the graph and yields progress lines while it works, then the final result. The API and UIs use this
+§ `graph.astream(state, stream_mode="updates", config={"recursion_limit": 40})` § run step by step; after each node we receive only what that node changed. recursion_limit = at most 40 node visits (a safety net against endless loops)
+§ `state.update({k: v ... if k != "steps"})` § keep our own copy of the notebook up to date
+§ `yield "step", line` / `yield "final", {...}` § send progress lines, then the answer, citations and grounded flag
+§ `async def ask(question)` § prints the progress lines and returns the final result (used on the command line and in tests)
+§ `if __name__ == "__main__": ...` § `python -m querymesh.graph "question"` runs the whole team and prints the answer and its sources
+
+The supervisor's decision table (read top to bottom; the first row that matches wins):
+§ Situation in the notebook § Next agent § Why
+§ retrieval_attempts is 0 § retriever (search_query = question) § nothing has been searched yet (or the Scout just added papers)
+§ no answer yet, relevant is None § grader § new chunks must be graded
+§ no answer yet, relevant has at least MIN_RELEVANT (2) chunks § writer § enough evidence
+§ no answer yet, too few relevant, retrieval_attempts < MAX_RETRIEVALS (2) § retriever with a rewritten query § retry loop 1: search better
+§ no answer yet, still too few, not scouted § scout § retry loop 2: fetch fresh papers from arXiv, then search again
+§ no answer yet, scouted already § writer § write with what we have; the writer says what is missing
+§ answer exists, grounded is None § critic § every answer is checked
+§ grounded is False and generation_attempts < MAX_GENERATIONS (2) § writer (with the Critic's feedback) § retry loop 3: fix the answer
+§ anything else § END § grounded, or out of attempts
+
+Watch out: indentation is part of Python. If you paste and VS Code shows red squiggles under `def`, the paste added spaces: press Ctrl+A, Delete, and paste again.
+CHECKPOINT: in the Terminal, `python -c "from querymesh.graph import graph; print(type(graph).__name__)"` prints CompiledStateGraph.
+If not: an ImportError names the file with a typo; compare it with the grey box.
+## SECTION 5.5 - Run the whole team on one question
+WHERE: VS Code Terminal, folder `~/querymesh`, venv active
+GOAL: see the five agents work in order and get a cited, checked answer.
+Step 1. Ask a question your index can answer (Part 4 loaded papers about retrieval):
+```
+python -m querymesh.graph "How does hybrid search combine keyword and vector retrieval?"
+```
+You should see (the numbers and words differ):
+```
+  .. retriever: 8 chunks (attempt 1)
+  .. grader: 4 of 8 chunks are relevant
+  .. writer: answer drafted (attempt 1)
+  .. critic: grounded=True
+
+Hybrid search runs a keyword (BM25) search and a vector search side by side [1] ...
+
+[1] Some Paper Title  http://arxiv.org/abs/2510.01234v1
+```
+Step 2. Count the lines that start with "..": they are the steps list from the shared state, in the order the supervisor chose.
+Step 3. Click one source link at the bottom (Ctrl+click in VS Code) to open the paper on arxiv.org in your browser.
+You should see: the arXiv page of a paper whose topic matches the answer.
+Watch out: the first run after a VM restart is slower (vLLM warms up). A run normally takes 10 to 40 seconds on the RTX A6000.
+CHECKPOINT: the run ends with an answer, at least one [n] citation, and a source list.
+If not: if the answer says the passages are not enough, your index is small; run Section 4.5 again with --max-papers 20.
+## SECTION 5.6 - Watch the retry loop and the Scout
+WHERE: VS Code Terminal, folder `~/querymesh`, venv active
+GOAL: see the agentic part: a weak first search, a rewritten query, then the Scout fetching fresh papers from arXiv.
+Step 1. Ask about a topic that Part 4 did NOT load (Part 4 loaded retrieval papers, not speech papers):
+```
+python -m querymesh.graph "What are recent methods for streaming speech recognition with transducers?"
+```
+You should see something like:
+```
+  .. retriever: 8 chunks (attempt 1)
+  .. grader: 0 of 8 chunks are relevant
+  .. supervisor: search again with 'streaming ASR RNN-T transducer low latency speech recognition'
+  .. retriever: 8 chunks (attempt 2)
+  .. grader: 1 of 8 chunks are relevant
+  .. scout: added 5 new papers from arXiv
+  .. retriever: 8 chunks (attempt 1)
+  .. grader: 4 of 8 chunks are relevant
+  .. writer: answer drafted (attempt 1)
+  .. critic: grounded=True
+```
+Step 2. Run the same command a second time.
+You should see: the first grader line already finds relevant chunks, because the Scout's papers are now in the index. No scout line appears.
+§ If you see... § It means... § Do this next
+§ the first grader already finds 2 or more § your index happened to contain such papers § try a more unusual topic, e.g. "protein folding with diffusion models"
+§ scout: added 0 new papers § arXiv returned papers you already have, or nothing matched the 4 keywords § normal; the writer then says what is missing
+§ critic: grounded=False then writer: answer drafted (attempt 2) § retry loop 3 worked: the Critic rejected a claim and the Writer fixed it § nothing, this is the design
+§ GraphRecursionError § more than 40 node visits § should not happen with the default limits; check MAX_RETRIEVALS and MAX_GENERATIONS in .env are small numbers (2)
+
+CHECKPOINT: you have seen at least one "supervisor: search again" line and one "scout:" line.
+If not: use a stranger topic (see the table).
+## SECTION 5.7 - Prove the routing with tests (no GPU needed)
+WHERE: VS Code Explorer, folder `tests`, then the Terminal
+GOAL: three automatic tests that check the supervisor's decisions with fake agents. They run in 2 seconds and also run in GitHub Actions (Part 6B).
+Step 1. Right-click the folder `tests`.
+Step 2. Click **New File...**.
+Step 3. Type `__init__.py` and press Enter (leave the file empty; it makes `tests` a package so one test file can import another).
+Step 4. Press Ctrl+S.
+Step 5. Right-click the folder `tests` again.
+Step 6. Click **New File...**.
+Step 7. Type `test_graph.py` and press Enter.
+Step 8. Paste the grey box below.
+Step 9. Press Ctrl+S.
+@code tests/test_graph.py
+§ Line(s) § What it does (plain English)
+§ `CHUNK = {...}` § one fake chunk, so no OpenSearch is needed
+§ `def fake_skills(monkeypatch, relevant_after_scout=False, grounded_sequence=(True,))` § replaces the five real agents with tiny fakes and records the order in which they are called
+§ `monkeypatch` § a pytest helper that swaps a variable for the duration of one test and puts it back afterwards
+§ `calls.append("retrieve")` § each fake writes its name into the calls list
+§ `grade(...)` returns [] until the scout ran § simulates "the index has nothing until fresh papers arrive"
+§ `critic(...)` returns `grounded.pop(0)` § each critic call takes the next verdict from the list, e.g. first False, then True
+§ `monkeypatch.setattr(graph, "LOCAL_SKILLS", {...})` § the graph now calls the fakes
+§ `monkeypatch.setattr(skills, "rewrite_query", lambda q, p: "better query")` § no LLM for the rewriter either
+§ `async def test_happy_path` § expects exactly retrieve, grade, write, critic
+§ `async def test_retry_then_scout` § expects retrieve, grade, retrieve, grade (retry loop), scout, retrieve, grade, write, critic
+§ `async def test_rewrite_when_not_grounded` § the Critic says False once, so the last four calls must be write, critic, write, critic
+§ `assert ...` § the test fails with a clear message if the order is different
+
+Step 10. Run all tests:
+```
+pytest -q
+```
+You should see: all tests pass, for example `10 passed` once Part 6A's tests exist too. Right now (only Part 4 and Part 5 files) you see `3 passed` (more if you already created other test files).
+Watch out: "async def test_..." needs pytest-asyncio; it is installed by the dev extra in Section 2B.7, and pyproject.toml sets asyncio_mode = "auto".
+CHECKPOINT: pytest prints passed and no failed.
+If not: "fixture 'monkeypatch' not found" means pytest is not the venv's pytest: run `source .venv/bin/activate` and repeat.
+## SECTION 5.8 - Create the Upstash Redis database (free)
+WHERE: web browser on your laptop
+GOAL: a free managed Redis database on the internet, and its address in .env as REDIS_URL.
+Step 1. Open https://console.upstash.com
+Step 2. Click **Sign up** (or **Login**) and sign in with GitHub or Google.
+Step 3. Click the **Redis** tab at the top.
+Step 4. Click **+ Create Database**.
+Step 5. Fill the form:
+§ Field § Value § Why
+§ Database Name § querymesh-cache § any name; this one is easy to recognise
+§ Primary Region § the region closest to your Hyperstack VM (for Hyperstack CANADA-1 choose US-East / N. Virginia) § fewer milliseconds per cache call
+§ Read Regions § leave empty § not needed for one user
+§ Plan § Free § 1 database, 250 MB, 500K commands per month [28]
+Step 6. Click **Next**, choose **Free**, then click **Create** (button names can differ slightly (verify)).
+You should see: the database page with a **Details** section showing Endpoint, Port and Password/Token.
+Step 7. Copy the **Endpoint** (looks like `funny-bird-12345.upstash.io`).
+Step 8. Copy the **Password** or **Token** (a long string; click the eye or copy icon).
+Step 9. Build your URL from this pattern:
+```
+rediss://default:UPSTASH_TOKEN@UPSTASH_ENDPOINT:6379
+```
+§ Placeholder § Replace with § Example
+§ UPSTASH_TOKEN § the password/token from Step 8 § AbCdEf123...
+§ UPSTASH_ENDPOINT § the endpoint from Step 7 § funny-bird-12345.upstash.io
+Step 10. In VS Code, open the file `.env`.
+Step 11. Replace the line `REDIS_URL=CHANGE_ME` with your URL, for example:
+```
+REDIS_URL=rediss://default:AbCdEf123@funny-bird-12345.upstash.io:6379
+```
+Step 12. Press Ctrl+S.
+Watch out: it is rediss with TWO s (TLS encryption). Upstash refuses plain redis:// connections.
+Watch out: the token is a password. Never paste it into code, a screenshot or Git. .env is in .gitignore.
+CHECKPOINT: `grep ^REDIS_URL .env | cut -c1-18` prints `REDIS_URL=rediss:/`.
+If not: open .env and fix the line; there must be no spaces around =.
+## SECTION 5.9 - Create querymesh/cache.py and prove the cache works
+WHERE: VS Code Explorer, folder `querymesh`, then the Terminal
+GOAL: an exact-match answer cache: the key is the SHA-256 fingerprint of the normalised question; the value is the final answer as JSON; it expires after 24 hours.
+Step 1. Right-click the folder `querymesh`.
+Step 2. Click **New File...**.
+Step 3. Type `cache.py` and press Enter.
+Step 4. Paste the grey box below.
+Step 5. Press Ctrl+S.
+@code querymesh/cache.py
+§ Line(s) § What it does (plain English)
+§ `import hashlib` § Python's built-in fingerprint functions, including SHA-256
+§ `import redis` § the standard Redis client; it works with Upstash because Upstash speaks the normal Redis protocol over TLS
+§ `_client = (redis.Redis.from_url(...) if config.REDIS_URL.startswith(("redis://", "rediss://")) else None)` § connect only if REDIS_URL looks like a Redis address; if it is empty or still CHANGE_ME, the cache is simply off
+§ `decode_responses=True` § Redis returns Python text instead of raw bytes
+§ `socket_timeout=5` § never wait more than 5 seconds for the cache
+§ `def cache_key(question)` § builds the key for one question
+§ `" ".join(question.lower().split())` § normalising: lower case and single spaces, so "What is  RAG? " and "what is rag?" give the same key
+§ `hashlib.sha256(f"{config.LLM_MODEL}|{normalised}".encode("utf-8")).hexdigest()` § the 64-character fingerprint. The model name is included, so a new model never serves answers made by the old one
+§ `return f"querymesh:answer:{digest}"` § a readable prefix: you can list all QueryMesh keys with the pattern querymesh:answer:*
+§ `def get(question)` § returns the stored answer as a dictionary, or None when there is none
+§ `except redis.RedisError` § if Upstash is unreachable we log a warning and continue without the cache: the cache must never break the app
+§ `json.loads(raw) if raw else None` § the stored text is JSON; turn it back into a dictionary
+§ `def put(question, result)` § stores the answer as JSON text
+§ `ex=config.CACHE_TTL_SECONDS` § expire after 86,400 seconds = 24 hours, so new papers are not hidden by old answers forever
+
+Step 6. Store a test value and read it back:
+```
+python -c "from querymesh import cache; cache.put('What is RAG?', {'answer': 'test'}); print(cache.get('  what is   rag? '))"
+```
+You should see: {'answer': 'test'}  (a differently written question found the same entry: that is the normalisation)
+Step 7. Print the key to see the SHA-256 fingerprint:
+```
+python -c "from querymesh import cache; print(cache.cache_key('What is RAG?'))"
+```
+You should see: querymesh:answer: followed by 64 letters and digits.
+Step 8. Open the Upstash console in your browser, click your database, then the **Data Browser** tab.
+You should see: one key starting with querymesh:answer: and a TTL of about 86400 seconds.
+Step 9. Delete the test entry so it cannot confuse later tests:
+```
+python -c "from querymesh import cache; cache._client.delete(cache.cache_key('What is RAG?')); print(cache.get('What is RAG?'))"
+```
+You should see: None
+§ If you see... § It means... § Do this next
+§ None in Step 6 § the cache is off (REDIS_URL not loaded) § check Section 5.8 Step 11 and that you saved .env
+§ Error ... SSL / Connection reset § redis:// was used instead of rediss:// § fix the URL (two s)
+§ WRONGPASS / invalid password § wrong token § copy the token again from the Details tab
+§ a warning "cache read failed" § Upstash unreachable; the app continues without cache § check the VM's internet: `curl -sI https://upstash.com | head -1`
+
+Who uses the cache: the API in Part 6A calls cache.get before running the agents and cache.put after. You will see "cached": true on the second identical question there.
+CHECKPOINT: Step 6 prints {'answer': 'test'} and Step 9 prints None.
+If not: use the table above.
+## SECTION 5.10 - Common mistake at this level
+**Mistake:** trusting the answer because it sounds confident. A small model writes fluent text even when the passages do not support it.
+**How to spot it:** open the cited paper for one claim and search the page (Ctrl+F) for the key word. If the claim is not there, the Critic missed it. Also look at the steps: "grader: 0 of 8 relevant" followed directly by a writer step (after the scout) means the answer was written from weak evidence.
+**Fix:** keep the Critic step; raise MIN_RELEVANT to 3 in .env for stricter answers; load more papers on the topic (Section 4.5) so the Grader has real evidence to keep.
+**Second mistake:** caching a wrong answer for 24 hours. While you are still tuning prompts, set CACHE_TTL_SECONDS=300 (5 minutes) in .env, or delete keys as in Section 5.9 Step 9.
+## PART 5 RESULT CHECK (all must be true before Part 6A)
+§ Check § Command § Expected
+§ model reachable § `python -m querymesh.llm` § one sentence about arXiv
+§ graph builds § `python -c "from querymesh.graph import graph; print(type(graph).__name__)"` § CompiledStateGraph
+§ full team § `python -m querymesh.graph "How does hybrid search work?"` § retriever, grader, writer, critic lines, then a cited answer
+§ retry loop seen § Section 5.6 § a "supervisor: search again" line and a "scout:" line
+§ routing tests § `pytest -q tests/test_graph.py` § 3 passed
+§ cache § Section 5.9 Step 6 § {'answer': 'test'}

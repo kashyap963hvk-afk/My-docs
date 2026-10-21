@@ -1,0 +1,302 @@
+# PART 2A - Hyperstack GPU machine + SSH + VS Code + WinSCP (connection from zero)
+## BEFORE YOU START: what you are building in this part
+Your laptop has no strong GPU, so you rent one. Hyperstack is a cloud company that rents computers with NVIDIA GPUs by the hour. You will: (1) install two programs on your laptop (VS Code and WinSCP), (2) make an SSH key (a digital key pair that lets your laptop log in securely), (3) rent a GPU computer ("VM" = virtual machine) on Hyperstack, (4) connect to it three ways: PowerShell (a terminal), VS Code (an editor that works ON the VM) and WinSCP (drag-and-drop files), and (5) learn port forwarding, so web pages that run on the VM (Airflow, Gradio) open in your laptop's browser.
+§ Word § Plain meaning
+§ VM (virtual machine) § a computer in a data centre that you control over the internet
+§ SSH § the secure way to log in to a Linux computer remotely; it uses port 22
+§ SSH key pair § two files: the private key (stays on your laptop, never share) and the public key (.pub, you give it to Hyperstack)
+§ public IP § the internet address of your VM, for example 38.80.123.45
+§ environment (Hyperstack) § a folder in Hyperstack that holds your VMs and keys in one region
+§ flavor (Hyperstack) § the hardware size: which GPU, how many CPUs and how much memory
+§ image (OS image) § the operating system installed on the VM; ours already has the NVIDIA driver and Docker
+§ port forwarding § a tunnel inside SSH: http://localhost:7860 on your laptop shows what runs on port 7860 of the VM
+Result at the end of this part: VS Code on your laptop shows a terminal that says ubuntu@querymesh-gpu, nvidia-smi prints "NVIDIA RTX A6000", WinSCP shows /home/ubuntu, and a test web page on the VM opens in your laptop's browser.
+## SECTION 2A.1 - Install VS Code on your laptop
+WHERE: web browser on your Windows laptop
+GOAL: VS Code installed.
+Step 1. Open https://code.visualstudio.com/download
+Step 2. Click the Windows button (User Installer, x64).
+Step 3. Open the downloaded file VSCodeUserSetup-x64-....exe.
+Step 4. Click I accept the agreement, then Next.
+Step 5. Keep the install folder, click Next, then Next again.
+Step 6. On "Select Additional Tasks" tick Add "Open with Code" action to Windows Explorer file context menu and Add to PATH.
+Step 7. Click Next, then Install, then Finish.
+You should see: VS Code opens with a Welcome tab.
+CHECKPOINT: VS Code is open.
+If not: if Windows SmartScreen blocks the installer, click More info > Run anyway (the file comes from Microsoft).
+## SECTION 2A.2 - Install the Remote - SSH extension in VS Code
+WHERE: VS Code on your laptop
+GOAL: VS Code can open folders on the GPU computer.
+Step 1. Press Ctrl+Shift+X (the Extensions panel opens on the left).
+Step 2. In the search box type Remote - SSH
+Step 3. Click the result named Remote - SSH whose publisher is Microsoft.
+Step 4. Click Install.
+You should see: a new "><" icon in the bottom-left corner of VS Code.
+Watch out: install the one from Microsoft only; ignore look-alikes.
+CHECKPOINT: the extension shows "Installed" (or a gear icon instead of the Install button) [43].
+## SECTION 2A.3 - Hyperstack account and credit
+WHERE: web browser
+GOAL: a Hyperstack account with money on it.
+Step 1. Open https://console.hyperstack.cloud
+Step 2. Click Sign up (or Register) and create the account with your e-mail and a password.
+Step 3. Open the confirmation e-mail and click the link in it.
+Step 4. Log in to https://console.hyperstack.cloud
+Step 5. In the left menu click Billing.
+Step 6. Activate billing (add a payment card when asked).
+Step 7. Add credit: US$20-30 is enough for the whole manual.
+You should see: your credit balance on the Billing page.
+Watch out: Hyperstack only lets you deploy after you have topped up your balance. If the balance goes below 0, Hyperstack hibernates your VMs automatically [3].
+Watch out: only use addresses ending in hyperstack.cloud; look-alike websites exist.
+CHECKPOINT: the Billing page shows your credit.
+## SECTION 2A.4 - Create the SSH key on your laptop
+WHERE: Windows laptop > Start menu > type PowerShell > click Windows PowerShell
+GOAL: a private key file and a public key file in C:\Users\YOUR_NAME\.ssh
+Step 1. Check that SSH is installed. Type and press Enter:
+```
+ssh -V
+```
+You should see: OpenSSH_for_Windows_9.x ...
+Step 2. Create the key pair. Type and press Enter:
+```
+ssh-keygen -t ed25519 -f $env:USERPROFILE\.ssh\hyperstack_ed25519 -C "querymesh"
+```
+Step 3. When it asks "Enter passphrase (empty for no passphrase)", press Enter.
+Step 4. When it asks "Enter same passphrase again", press Enter.
+You should see: "Your identification has been saved in C:\Users\YOUR_NAME\.ssh\hyperstack_ed25519" and a small square picture of random characters.
+Step 5. Print the PUBLIC key:
+```
+Get-Content $env:USERPROFILE\.ssh\hyperstack_ed25519.pub
+```
+You should see: one line starting with ssh-ed25519 and ending with querymesh
+Step 6. Select that whole line with the mouse and press Ctrl+C (copy). Keep PowerShell open.
+§ Placeholder § Replace with § Example
+§ YOUR_NAME § your Windows user folder name (shown in the "saved in" line) § rahul
+§ Piece of the command § What it does
+§ ssh-keygen § the program that makes key pairs
+§ -t ed25519 § the key type: modern, short and secure
+§ -f $env:USERPROFILE\.ssh\hyperstack_ed25519 § where to save it: your user folder, sub-folder .ssh, file name hyperstack_ed25519
+§ -C "querymesh" § a comment at the end of the public key, so you recognise it later
+Watch out: the file WITHOUT .pub is your private key: never upload, e-mail or share it.
+Watch out: if ssh-keygen says the file already exists, type n and press Enter, then use the existing key (skip to Step 5).
+CHECKPOINT: the folder C:\Users\YOUR_NAME\.ssh contains hyperstack_ed25519 and hyperstack_ed25519.pub
+If not: if "ssh is not recognized", open Settings > System > Optional features > View features > search OpenSSH Client > Install, close and reopen PowerShell, repeat Step 1.
+## SECTION 2A.5 - Create an environment in Hyperstack
+WHERE: web browser > https://console.hyperstack.cloud
+GOAL: an environment named querymesh-env (holds your VM and key).
+Step 1. In the left menu click Virtual Machines.
+Step 2. Click Deploy New Virtual Machine (the deploy form opens).
+Step 3. Scroll to the Environment section.
+Step 4. Click Create New Environment.
+Step 5. In the name field type querymesh-env
+Step 6. Keep the suggested region and click Create (or Save).
+You should see: querymesh-env selected in the Environment section.
+Watch out: the VM and the SSH key must be in the SAME environment, or the key cannot be used [2].
+CHECKPOINT: querymesh-env exists and is selected. Keep this form open for the next section.
+## SECTION 2A.6 - Import your SSH key into Hyperstack
+WHERE: Hyperstack console > the same Deploy New Virtual Machine form
+GOAL: Hyperstack knows your public key.
+Step 1. In the SSH key area click Create New SSH Key.
+Step 2. Click the Import SSH key tab.
+Step 3. In Environment select querymesh-env
+Step 4. Click in the public key box and press Ctrl+V (the ssh-ed25519 ... line from Section 2A.4).
+Step 5. In Name type querymesh-key
+Step 6. Click Import.
+You should see: querymesh-key selected as the SSH key in the form.
+CHECKPOINT: querymesh-key is listed for querymesh-env.
+If not: "invalid key" = you pasted the private key or only part of the line; repeat Section 2A.4 Steps 5-6.
+## SECTION 2A.7 - Deploy the GPU machine (every field)
+WHERE: Hyperstack console > Deploy New Virtual Machine form
+GOAL: one GPU computer that is starting up.
+Step 1. Fill the form one field at a time, exactly as in this table.
+§ Field (in the form) § Value § Why
+§ Flavor (GPU card) § RTX-A6000, GPU count 1 (flavor name n3-RTX-A6000x1) § 48 GB of GPU memory runs Qwen3-4B in vLLM with room to spare, for about US$0.50 per hour [1]
+§ Environment § querymesh-env § holds your key
+§ OS image (tab OS Images) § Ubuntu Server 24.04 LTS R570 CUDA 12.8 with Docker § NVIDIA driver 570, CUDA 12.8, Docker and the NVIDIA container toolkit already installed; user ubuntu is in the docker group [4]
+§ SSH key § querymesh-key § lets you log in
+§ SSH Access § ON (toggle enabled) § opens port 22 in the firewall
+§ Public IP Address § ON (toggle enabled) § you connect over the internet
+§ Number of VMs to deploy § 1 § one machine
+§ Virtual Machine Name (Additional settings) § querymesh-gpu § easy to recognise
+§ Jupyter Notebook, Cloud-init Script, Labels, Firewall Rules § leave empty / off § not needed; we use port forwarding instead of opening ports
+Step 2. Look at Final Configuration and Price Breakdown and check the hourly price (about US$0.50 per hour for 1x RTX A6000, verify).
+Step 3. Click Deploy.
+You should see: the Virtual Machines page with querymesh-gpu and a status such as CREATING or BUILD.
+Watch out: billing starts when the status becomes ACTIVE [2].
+§ If you see... § It means... § Do this next
+§ RTX-A6000 is greyed out § sold out in this region § choose 1x L40 (n3-L40x1, about US$1.00/h) or 1x A100 80GB (n3-A100x1, about US$1.35/h); everything in this manual works the same
+§ the image "Ubuntu Server 24.04 LTS R570 CUDA 12.8 with Docker" is missing § different images in this region § choose "Ubuntu Server 24.04 LTS R595 CUDA 13.2 with Docker" (newer driver, also works with the vLLM image)
+§ "Insufficient balance" § no credit § go back to Section 2A.3 Step 7
+CHECKPOINT: querymesh-gpu appears in the Virtual Machines list.
+## SECTION 2A.8 - Wait for ACTIVE, copy the IP, check the SSH firewall
+WHERE: Hyperstack console > Virtual Machines
+GOAL: the VM is running and reachable on port 22.
+Step 1. Wait until the Status column shows ACTIVE (usually 2-10 minutes; refresh the page).
+Step 2. In the PUBLIC IP column, copy the address and paste it into secrets.txt as VM_IP = ...
+Step 3. Click the VM name querymesh-gpu (the VM details page opens).
+Step 4. Click the Firewall tab.
+Step 5. Make sure Enable SSH access is ON.
+Step 6. Under Inbound Rules, check there is a TCP port 22 rule with status SUCCESS.
+Step 7. Click the Networking tab and find Connect over SSH: it shows a command like ssh ubuntu@38.80.123.45 (you add your key to it in the next section).
+You should see: ACTIVE, a public IP, and the port 22 rule.
+Watch out: do not add rules for 8000, 9200 or 8080. Those services have no password of their own or only an API key; you will reach them safely through SSH port forwarding (Section 2A.12) [5].
+CHECKPOINT: you have VM_IP and the port 22 rule shows SUCCESS.
+If not: no public IP = Networking tab > turn on Public IP Attached.
+## SECTION 2A.9 - First connection from PowerShell
+WHERE: Windows PowerShell on your laptop
+GOAL: log in to the GPU computer and see the GPU.
+Step 1. Type (replace VM_IP) and press Enter:
+```
+ssh -i $env:USERPROFILE\.ssh\hyperstack_ed25519 ubuntu@VM_IP
+```
+Step 2. When asked "Are you sure you want to continue connecting (yes/no/[fingerprint])?" type yes and press Enter.
+You should see: a welcome text and the prompt ubuntu@querymesh-gpu:~$
+Step 3. Type and press Enter:
+```
+nvidia-smi
+```
+You should see: a table containing "NVIDIA RTX A6000", "49140MiB" (48 GB) of memory, "Driver Version: 570.xx" and "CUDA Version: 12.8".
+Step 4. Check the disk space:
+```
+df -h /
+```
+You should see: the root disk / with at least 80 GB free. The vLLM image (about 10 GB), the model (about 8 GB) and the Python packages (about 8 GB) fit easily.
+Step 5. Type exit and press Enter (you are back on your laptop).
+§ Placeholder § Replace with § Example
+§ VM_IP § the PUBLIC IP from Section 2A.8 § 38.80.123.45
+CHECKPOINT: nvidia-smi showed the RTX A6000 and driver 570 or newer.
+If not: see Section 2A.14.
+## SECTION 2A.10 - Connect VS Code to the GPU computer (Remote-SSH)
+WHERE: VS Code on your laptop
+GOAL: VS Code opens folders and terminals ON the GPU computer.
+Step 1. Press F1 (a command box opens at the top).
+Step 2. Type Remote-SSH: Open SSH Configuration File and press Enter.
+Step 3. Click the first file: C:\Users\YOUR_NAME\.ssh\config
+Step 4. Paste this at the end of the file (replace VM_IP and YOUR_NAME):
+```
+Host querymesh
+    HostName VM_IP
+    User ubuntu
+    IdentityFile C:\Users\YOUR_NAME\.ssh\hyperstack_ed25519
+    ServerAliveInterval 60
+```
+Step 5. Press Ctrl+S to save.
+Step 6. Press F1.
+Step 7. Type Remote-SSH: Connect to Host and press Enter.
+Step 8. Click querymesh.
+Step 9. If a box asks "Select the platform of the remote host", click Linux.
+Step 10. Wait until the bottom-left corner shows SSH: querymesh (the first time VS Code installs a small server on the VM, about 1 minute).
+Step 11. In the top menu click Terminal > New Terminal.
+You should see: a terminal panel at the bottom with the prompt ubuntu@querymesh-gpu:~$
+Step 12. In that terminal type hostname and press Enter.
+You should see: querymesh-gpu
+§ Line in the config § What it means
+§ Host querymesh § a short nickname you choose
+§ HostName VM_IP § the real address
+§ User ubuntu § the login name on Hyperstack Ubuntu images
+§ IdentityFile ... § which private key to use
+§ ServerAliveInterval 60 § send a small "I am here" message every 60 seconds so the connection does not drop
+Watch out: from now on, "VS Code Terminal" in this manual ALWAYS means this terminal connected to the GPU computer (bottom-left shows SSH: querymesh), not your laptop.
+CHECKPOINT: hostname prints querymesh-gpu.
+If not: F1 > Remote-SSH: Kill VS Code Server on Host > querymesh, then repeat Steps 6-10.
+## SECTION 2A.11 - Install and connect WinSCP (drag-and-drop files)
+WHERE: web browser, then WinSCP on your laptop
+GOAL: see the GPU computer's files next to your laptop files, and open them in VS Code with a double-click.
+Step 1. Open https://winscp.net/eng/download.php
+Step 2. Click DOWNLOAD WINSCP (the installation package).
+Step 3. Run the downloaded WinSCP-x.x.x-Setup.exe.
+Step 4. Choose Install for me only.
+Step 5. Accept the licence, choose Typical installation, then Commander interface.
+Step 6. Click Install, then Finish.
+Step 7. Open WinSCP. The Login window appears.
+Step 8. Click New Site.
+Step 9. Fill the fields:
+§ Field § Value § Why
+§ File protocol § SFTP § file transfer inside SSH
+§ Host name § VM_IP § your GPU computer
+§ Port number § 22 § SSH port
+§ User name § ubuntu § the login name
+§ Password § (empty) § you use a key
+Step 10. Click Advanced...
+Step 11. In the left list click SSH > Authentication.
+Step 12. Next to Private key file click the ... button.
+Step 13. In the file window change the file type filter (bottom right) to All Files (*.*).
+Step 14. Open C:\Users\YOUR_NAME\.ssh\hyperstack_ed25519 (the file WITHOUT .pub).
+Step 15. WinSCP asks to convert the key to PuTTY format: click OK, then Save (it creates hyperstack_ed25519.ppk).
+Step 16. Click OK to close Advanced.
+Step 17. Click Save, type querymesh as the site name, click OK.
+Step 18. Click Login.
+Step 19. If asked "Continue connecting to an unknown server?", click Accept.
+You should see: two panels: your laptop on the left, /home/ubuntu on the right.
+How to copy files: drag a file from the right panel to the left panel = download to your laptop; drag from left to right = upload to the GPU computer.
+Now connect WinSCP to VS Code, so a double-click on a VM file opens it in VS Code:
+Step 20. In WinSCP click Options > Preferences.
+Step 21. In the left list click Editors.
+Step 22. Click Add....
+Step 23. Choose External editor and click Browse.
+Step 24. Open C:\Users\YOUR_NAME\AppData\Local\Programs\Microsoft VS Code\Code.exe
+Step 25. Click OK.
+Step 26. Select the new Code.exe line and click Up until it is at the top of the list.
+Step 27. Click OK.
+You should see: double-clicking a text file in the right panel opens it in VS Code; when you save it (Ctrl+S), WinSCP uploads it back to the VM.
+Watch out: for project files, prefer editing directly in the VS Code Remote-SSH window (Section 2A.10). Use the WinSCP + VS Code editor for quick looks and for copying files to and from your laptop.
+CHECKPOINT: the right panel shows /home/ubuntu.
+If not: "Server refused our key" = choose the .ppk file WinSCP created in Step 15 [43].
+## SECTION 2A.12 - Port forwarding: open VM web pages in your laptop browser
+WHERE: VS Code (connected, bottom-left shows SSH: querymesh)
+GOAL: a web page served on the VM opens at http://localhost:PORT on your laptop, with no firewall change.
+Step 1. In the VS Code Terminal start a tiny test web server on port 8765:
+```
+python3 -m http.server 8765
+```
+You should see: Serving HTTP on 0.0.0.0 port 8765 (http://0.0.0.0:8765/) ...
+Step 2. In the bottom panel click the PORTS tab (next to TERMINAL).
+Step 3. Click Forward a Port (or the + button).
+Step 4. Type 8765 and press Enter.
+You should see: a row with Port 8765 and Forwarded Address localhost:8765.
+Step 5. On your laptop, open the browser at http://localhost:8765
+You should see: "Directory listing for /" with the files of /home/ubuntu.
+Step 6. Back in the VS Code Terminal, press Ctrl+C to stop the test server.
+Step 7. In the PORTS tab, right-click the 8765 row and click Stop Forwarding Port.
+The ports you will forward later:
+§ Port § Service § Section
+§ 8080 § Airflow web UI § 4.8
+§ 8090 § QueryMesh API (/docs page) § 6A.7
+§ 7860 § Gradio web chat § 6A.9
+§ 8101-8105 § the five agents (Agent Cards) § 6A.3
+Watch out: VS Code often forwards a port automatically when a program prints a localhost address; check the PORTS tab before adding it again. The forward only works while VS Code is connected.
+CHECKPOINT: the directory listing opened in your laptop browser.
+If not: if the browser says "connection refused", the server on the VM is not running (repeat Step 1) or the port number differs between Step 1 and Step 4.
+## SECTION 2A.13 - Stop paying: hibernate, restore and delete
+WHERE: Hyperstack console > Virtual Machines > click querymesh-gpu
+GOAL: no GPU bill while you are not working (do this EVERY time you stop).
+Step 1. In the VS Code Terminal, check nothing important is running: type tmux ls (you learn tmux in Part 2B; "no server running" is fine).
+Step 2. In the Hyperstack console, open the VM details page (click querymesh-gpu).
+Step 3. Hover over the menu with three dots in the top-right corner.
+Step 4. Click Hibernate this VM.
+Step 5. In the dialog, leave "Keep Public IP attached?" OFF (cheaper; you get a new IP later) or turn it ON (small hourly charge, same IP).
+Step 6. Click Hibernate this VM to confirm.
+You should see: status HIBERNATING, then HIBERNATED.
+Step 7. To work again: open the VM details page, hover over the three-dot menu and click Restore (wait for ACTIVE).
+Step 8. If the public IP changed: put the new IP in HostName of C:\Users\YOUR_NAME\.ssh\config (Section 2A.10 Steps 1-5) and in the WinSCP site (Edit > Host name).
+§ VM status § GPU billed? § What is kept
+§ ACTIVE § yes § everything
+§ SHUTOFF (Stop) § YES, still billed [3] § everything
+§ HIBERNATED § no (only the saved disk and a kept IP are billed) [3] § your files in /home/ubuntu, Docker images and volumes
+§ Deleted § no § nothing
+After Restore, the Docker containers vLLM and OpenSearch start again by themselves (they use --restart unless-stopped). FakeCloud, Airflow and the agents do not: restart them with the commands in Part 9 (QM Parts 8-14 - Reference).
+Watch out: "Stop" is NOT a money saver on Hyperstack. Use Hibernate this VM or Delete.
+Watch out: restoring needs the same GPU flavor to be in stock; if it is not, try later. Push your code to GitHub often (Section 2B.13), so you can rebuild on a new VM if needed.
+CHECKPOINT: when you finish a work session, the VM shows HIBERNATED.
+## SECTION 2A.14 - Connection troubleshooting
+WHERE: PowerShell, VS Code or WinSCP on your laptop, and the Hyperstack console
+GOAL: fix any connection problem in a few minutes.
+Step 1. Find your symptom in the table and do the fix in the right column.
+§ Symptom § Likely cause § Exact fix
+§ ssh: connect to host ... port 22: Connection timed out § SSH access off, wrong IP, or VM not ACTIVE § 1) VM status must be ACTIVE. 2) Firewall tab > Enable SSH access ON. 3) Copy the IP again from the PUBLIC IP column
+§ Permission denied (publickey) § wrong key file or wrong user § use -i with the file WITHOUT .pub and the user ubuntu; the key must be imported in the SAME environment as the VM
+§ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED § new VM on an old IP § in PowerShell run `ssh-keygen -R VM_IP`, then connect again
+§ VS Code stuck on "Setting up SSH host" § half-installed VS Code server § F1 > Remote-SSH: Kill VS Code Server on Host, connect again
+§ WinSCP "Server refused our key" § key not in PuTTY format § use the .ppk file from Section 2A.11 Step 15
+§ nvidia-smi: command not found § wrong OS image (no driver) § delete the VM and deploy again with an image whose name contains R570 CUDA 12.8 with Docker
+§ localhost:PORT does not open in the browser § the service is not running or the port is not forwarded § check the PORTS tab; on the VM run `curl -s localhost:PORT` to see if the service answers
+CHECKPOINT: after the fix, Section 2A.9 Step 1 logs you in again.

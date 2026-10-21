@@ -1,0 +1,264 @@
+# PARTS 8-14 - Reference: tools, maintenance, troubleshooting, projects, cheat sheet, self-test, sources
+This tab is the place you come back to. Everything here was checked in October 2026. Prices change: when a row says (verify), open the link in PART 14 before you spend money.
+# PART 8 - Tools and Resources Map (checked October 2026)
+## 8.1 Every tool in QueryMesh
+§ Tool § What it does § Free / Open-source / Paid § Exact cost + free-tier limits § Who uses it § Platform § Official link (+ GitHub stars) § Best for § My verdict
+§ Hyperstack § rents NVIDIA GPU computers by the hour § Paid § RTX A6000 48 GB about US$0.50/h, L40 48 GB US$1.00/h, A100 80 GB US$1.35/h; SHUTOFF still bills, HIBERNATE stops GPU billing [1][3] § beginners to startups that need cheap GPUs § web console + Ubuntu VMs § https://www.hyperstack.cloud § cheap single-GPU work § best price per GB of VRAM for this project
+§ VS Code + Remote - SSH § edit and run code on the GPU computer from your laptop § Free § US$0 [43] § almost every developer § Windows / macOS / Linux § https://code.visualstudio.com § daily work on a remote VM § must-have
+§ WinSCP § drag-and-drop file copy over SSH § Free, open source § US$0 [43] § Windows users and sysadmins § Windows § https://winscp.net § copying files laptop <-> VM § simple and reliable
+§ uv § installs Python and packages very fast § Free, open source (Astral) § US$0 [42] § industry and open-source projects § all § https://docs.astral.sh/uv/ (about 80k stars, verify) § Python environments § replaces pip + venv + pyenv
+§ arXiv API + arxiv package § searches arXiv and returns paper metadata and PDF links § Free § 1 request every 3 seconds [10][11] § researchers, research tools (Semantic Scholar, alphaXiv) § any § https://info.arxiv.org/help/api/ § fresh research papers § respect the rate limit or you get blocked
+§ Docling § turns PDFs into clean Markdown (headings, tables) § Free, open source (IBM Research, LF AI) § US$0 [12] § industry RAG pipelines, researchers § Python, CPU or GPU § https://github.com/docling-project/docling (about 45k stars, verify) § scientific PDFs with tables § best open-source PDF parser for RAG today
+§ Apache Airflow 3 § runs jobs on a schedule with retries and a UI § Free, open source (Apache) § US$0 self-hosted; managed: Astronomer, AWS MWAA (paid) [13] § Airbnb, Lyft, data teams everywhere § Python § https://airflow.apache.org (about 43k stars, verify) § scheduled ingestion § industry standard scheduler
+§ OpenSearch § search engine: BM25 keywords + vector (k-NN) + hybrid with RRF § Free, open source (Linux Foundation) § US$0 self-hosted; Amazon OpenSearch Service is paid [14][15] § AWS, Uber, SAP, many RAG systems § Docker / Kubernetes § https://opensearch.org (about 11k stars, verify) § hybrid search in one engine § one engine for both search types: simpler than two databases
+§ Jina AI embeddings § turns text into 1024-number vectors § Paid API with free trial § 10M free tokens per new key; then pay per token (verify price) [17][18] § startups, RAG builders; Jina is part of Elastic since 2025 § HTTPS API § https://jina.ai/embeddings/ § multilingual retrieval § strong quality, easy API; weights are CC BY-NC (non-commercial self-hosting)
+§ vLLM § fast server for open LLMs with an OpenAI-compatible API § Free, open source § US$0 (you pay only for the GPU) [21] § industry inference teams, researchers § Linux + NVIDIA/AMD GPU § https://github.com/vllm-project/vllm (about 70k stars, verify) § serving open models § the default open-source LLM server
+§ Qwen3-4B-Instruct-2507 § the language model all agents use § Free, open weights (Apache-2.0) § US$0 [22] § researchers, startups § any GPU with 12 GB+ § https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507 § fast, cheap agents § strong for its size; switch to a bigger model by changing one env var
+§ LangGraph § builds agent workflows as graphs with shared state § Free, open source (LangChain) § US$0; LangGraph Platform/LangSmith are paid add-ons [20] § Klarna, Replit, Elastic, LinkedIn (verify) § Python / JS § https://github.com/langchain-ai/langgraph (about 25k stars, verify) § supervisor-worker agents with loops § the most used agent graph library
+§ FastMCP § builds MCP servers and clients in Python § Free, open source § US$0 [23] § industry MCP servers § Python § https://gofastmcp.com (about 25k stars, verify) § exposing tools to agents § the easiest way to write MCP servers
+§ A2A Python SDK § agent-to-agent protocol: Agent Cards, tasks, messages § Free, open source (Linux Foundation, started by Google) § US$0 [25] § Google, Salesforce, SAP and 100+ partners (verify) § Python, JS, Java, Go § https://github.com/a2aproject/a2a-python § agents from different teams talking § use it when agents are separate services
+§ Pydantic Logfire § traces: spans for every request, call and step § Free tier + paid § Personal plan free: 10M spans/logs/metrics per month; Team/Growth US$2 per extra million [26] § Pydantic users, startups § SaaS + Python SDK (OpenTelemetry) § https://logfire.pydantic.dev § seeing where time goes § excellent UI, OpenTelemetry under the hood
+§ Langfuse Cloud § LLM traces: prompts, answers, tokens, cost § Free tier + paid; open source core § Hobby free: 50k units/month, 30 days, 2 users; Core US$29/month [27] § many LLM teams; self-hostable § SaaS or self-host § https://langfuse.com (about 20k stars, verify) § token and cost tracking § the open-source LLM observability leader
+§ Upstash Redis § serverless Redis for the answer cache § Free tier + pay as you go § free: 1 database, 250 MB, 500K commands/month, 10 GB bandwidth; then US$0.20 per 100K commands [28] § Vercel/Next.js apps, serverless teams § SaaS (TLS) § https://upstash.com/docs/redis § small caches without a server § perfect for a free exact-match cache
+§ Gradio § web chat UI in a few lines of Python § Free, open source (Hugging Face) § US$0 [29] § researchers, Hugging Face Spaces § Python § https://github.com/gradio-app/gradio (about 40k stars, verify) § demos and internal tools § fastest way to a usable UI
+§ python-telegram-bot § Telegram bot framework § Free, open source § US$0 [30] § hobby to production bots § Python § https://github.com/python-telegram-bot/python-telegram-bot (about 28k stars, verify) § chat interface on phones § mature, async, well documented
+§ FastAPI + PyJWT § web API + signed login tokens § Free, open source § US$0 [31] § Microsoft, Uber, Netflix (FastAPI) § Python § https://fastapi.tiangolo.com § the QueryMesh API gateway § standard Python API stack
+§ Docker + Compose § packages the app into images; runs many containers together § Free (Docker Engine) § US$0 on Linux § everyone § Linux / Windows / macOS § https://docs.docker.com § one-machine deployment § must-have
+§ kind § real Kubernetes cluster made of Docker containers § Free, open source § US$0 [32] § Kubernetes developers, CI pipelines § Linux / macOS / Windows § https://kind.sigs.k8s.io § practising Kubernetes for free § the local twin of EKS in this manual
+§ Helm § package manager for Kubernetes (charts) § Free, open source (CNCF) § US$0 [34] § almost every Kubernetes team § any § https://helm.sh § one command to install the whole app § must-have for EKS
+§ FakeCloud § local AWS emulator: same aws commands, endpoint localhost:4566 § Free, open source (AGPL-3.0) § US$0 [6] § developers testing AWS code § Linux / macOS / Docker § https://fakecloud.dev § practising AWS without a bill § great for ECR/S3/IAM/Secrets; EKS is metadata only
+§ AWS EKS § managed Kubernetes on AWS § Paid § US$0.10/h per cluster + worker EC2 (t3.large US$0.0832/h) + NAT US$0.045/h + ALB US$0.0225/h [36][41] § enterprises, scale-ups § AWS § https://aws.amazon.com/eks/ § production Kubernetes § production-grade but costs about US$0.40/h for this project
+§ AWS Load Balancer Controller § turns a Kubernetes Ingress into an AWS ALB § Free (you pay for the ALB) § ALB US$0.0225/h + LCU [38] § EKS users § EKS § https://kubernetes-sigs.github.io/aws-load-balancer-controller/ § public HTTPS entry point § the standard way on EKS
+§ External Secrets Operator § copies AWS Secrets Manager secrets into Kubernetes Secrets § Free, open source (CNCF) § US$0; Secrets Manager US$0.40/secret/month [39][41] § most EKS teams § Kubernetes § https://external-secrets.io (about 5k stars, verify) § no secrets in Git or Helm values § must-have for real clusters
+§ GitHub Actions § CI/CD: test, build, push, deploy on every push § Free tier + paid § public repos free; private repos 2,000 minutes/month free (verify) [40] § everyone on GitHub § cloud runners § https://docs.github.com/actions § the QueryMesh pipeline § with OIDC there are no AWS keys in GitHub
+
+## 8.2 Best setups
+§ Setup § What to use § Monthly cost (approx.)
+§ Best free setup (learning) § Hyperstack VM only while you work + hibernate; Jina free tokens; Upstash free; Logfire Personal; Langfuse Hobby; FakeCloud + kind instead of AWS; GitHub Actions test job only § US$10-25 GPU time, everything else US$0
+§ Best paid setup (production) § EKS with 3 nodes across 3 zones, Amazon OpenSearch Service (managed, multi-AZ), Amazon ElastiCache or Upstash Pro, vLLM on dedicated GPU nodes or a managed endpoint, Logfire Team, Langfuse Core/Pro, AWS WAF in front of the ALB § several hundred US$ per month
+§ Best setup within the manual's budget § Hyperstack RTX A6000 for vLLM (hibernate between sessions), everything else free tiers, real AWS only for one afternoon in Part 6B, then teardown § about US$15-30 in total
+
+## 8.3 Open-source projects worth studying
+§ Repository § Why study it
+§ https://github.com/langchain-ai/langgraph (examples folder: supervisor, agentic RAG) § the official patterns behind Part 5
+§ https://github.com/a2aproject/a2a-samples § many A2A agents in several frameworks: compare with our agents.py
+§ https://github.com/jlowin/fastmcp § how a production MCP framework handles transports, auth and tests
+§ https://github.com/opensearch-project/neural-search § the code that runs hybrid queries and RRF inside OpenSearch
+§ https://github.com/explodinggradients/ragas § standard RAG evaluation metrics (faithfulness, context precision) to extend Part 7
+
+# PART 9 - Keep It Working
+## 9.1 Every day you work
+§ When § Do this § Command or click
+§ Start of session § Restore the VM if hibernated § Hyperstack > Virtual Machines > querymesh-gpu > Restore (Section 2A.13)
+§ Start of session § Connect VS Code § VS Code > green button bottom-left > Connect to Host > querymesh-gpu
+§ Start of session § Check the three services § `docker ps` (vllm, opensearch) and `curl -s localhost:4566/_fakecloud/health`
+§ Start of session § Start FakeCloud if it is not running § `nohup fakecloud --storage-mode persistent --data-path ~/fakecloud-data > ~/fakecloud.log 2>&1 &`
+§ Start of session § Re-attach your tmux session § `tmux attach -t qm`
+§ End of session § Save your code to GitHub § `git add -A && git commit -m "WHAT YOU DID" && git push`
+§ End of session § Hibernate the VM (stops GPU billing) § Hyperstack > querymesh-gpu > Hibernate
+§ End of a real-AWS session § Tear everything down § Section 6B.15
+
+## 9.2 Back up
+- Code: GitHub (Section 2B.13). Push at the end of every session.
+- Secrets: keep a copy of .env in your password manager. Never commit it (it is in .gitignore).
+- OpenSearch data: it lives in the Docker volume opensearch-data. You can always rebuild it by running the ingestion again, so no backup is needed for learning.
+- Airflow settings: ~/airflow (re-created by airflow standalone if lost).
+
+## 9.3 Update safely
+- Python packages are pinned in pyproject.toml. To update one: change its version, run `uv pip install -e ".[dev,ingest]"`, run `pytest -q`, then try `python -m querymesh.graph "test question"`.
+- Docker images: change the tag in scripts/start_vllm.sh or scripts/start_opensearch.sh, run the script again.
+- Kubernetes: build a new image tag (v2), run `helm upgrade` with `--set image.tag=v2`; roll back with `helm rollback querymesh 1`.
+
+## 9.4 Undo
+§ What went wrong § Undo
+§ You broke a Python file § `git checkout -- querymesh/FILE.py` (back to the last commit)
+§ A bad Helm upgrade § `helm history querymesh -n querymesh` then `helm rollback querymesh REVISION -n querymesh`
+§ Bad data in the index § `curl -X DELETE localhost:9200/arxiv-chunks` then `python -m querymesh.search setup` and ingest again
+§ A wrong answer is stuck in the cache § wait 24 hours, or delete it: `python -c "from querymesh import cache; cache._client.delete(cache.cache_key('THE QUESTION'))"`
+§ FakeCloud state is a mess § `pkill fakecloud && rm -rf ~/fakecloud-data && mkdir ~/fakecloud-data`, start it again
+§ kind cluster is a mess § `kind delete cluster --name querymesh` then Section 6B.4 again
+
+# PART 10 - Troubleshooting
+§ Symptom § Likely cause § Exact fix (steps)
+§ `ssh: connect to host ... port 22: Connection timed out` § VM not ACTIVE, wrong IP, or SSH rule missing § 1. Hyperstack > querymesh-gpu: status must be ACTIVE. 2. Copy the IP again (it can change after Restore). 3. Firewall tab: add TCP 22 if missing. 4. Update the HostName line in your SSH config.
+§ `httpx.ConnectError` to localhost:8000 or 401 from vLLM § vLLM is still loading, crashed, or LLM_API_KEY differs § 1. `docker logs --tail 50 vllm` and wait for "Application startup complete". 2. Check that .env LLM_API_KEY is the same value the script used (re-run scripts/start_vllm.sh after changing it).
+§ `ConnectionError` to localhost:9200 § OpenSearch not running or vm.max_map_count too low § 1. `docker ps -a` shows opensearch? 2. `docker logs --tail 30 opensearch`. 3. If it says max virtual memory areas too low: `sudo sysctl -w vm.max_map_count=262144` and run scripts/start_opensearch.sh again.
+§ Jina returns 401 or 402 § key missing, wrong, or free tokens used up § 1. `grep JINA .env`. 2. Open https://jina.ai/embeddings/ and check the key balance. 3. If the error mentions the task name: set `EMBED_MODEL=jina-embeddings-v3` in .env and recreate the index (Part 9.4 "Bad data").
+§ Search returns 0 hits § nothing ingested yet, or index created with another dimension § 1. `curl -s localhost:9200/arxiv-chunks/_count`. 2. If count is 0: run Section 4.5. 3. If you changed EMBED_DIM: delete and recreate the index.
+§ `illegal_argument_exception ... search pipeline` § the RRF pipeline does not exist § run `python -m querymesh.search setup`
+§ arXiv `HTTP 429` or empty results § too many requests or a too narrow query § wait 1 minute; never run two ingestions at the same time; test the query on https://arxiv.org/search/advanced first
+§ The graph stops with `GraphRecursionError` § the supervisor kept looping § check MAX_RETRIEVALS and MAX_GENERATIONS in .env are small numbers (2); read the steps printed to see which agent repeats
+§ Remote mode: `AgentCardResolutionError` § one agent is not running, so discovery cannot read its Agent Card § `curl -s localhost:8102/.well-known/agent-card.json` for each port 8101-8105; start the missing one (Section 6A.3)
+§ API returns 401 § token missing, expired (60 min) or JWT_SECRET changed § get a new token with POST /token; all API replicas must share the same JWT_SECRET
+§ Cache never hits § REDIS_URL empty or not starting with rediss:// § `python -c "from querymesh import cache; print(cache._client)"` must not print None; copy the URL from the Upstash Details page again
+§ `kind load docker-image` says image not present § you built with a different name or tag § `docker images | grep querymesh` and use exactly that name:tag
+§ Pod stuck in `CreateContainerConfigError` § the Secret querymesh-secrets does not exist § kind: Section 6B.9 FakeCloud column; EKS: `kubectl get externalsecret -n querymesh` must show SecretSynced
+§ Ingress has no ADDRESS on EKS § AWS Load Balancer Controller not running or no permissions § `kubectl -n kube-system get pods | grep aws-load-balancer` and `kubectl -n kube-system logs deploy/aws-load-balancer-controller | tail`
+§ GitHub Actions: `Not authorized to perform sts:AssumeRoleWithWebIdentity` § the trust policy sub does not match the repo § check the repo name in deploy/aws/github-oidc-trust.json; new repos may use the immutable sub format (SPEC note in 6B.14)
+
+# PART 11 - Practice Projects
+## 11.1 Easy - Add a sixth agent: the Summariser
+Goal: an agent that turns the final answer into 3 bullet points for Telegram.
+Requirements: a new skill function, a new entry in AGENTS (port 8106) with its own Agent Card, a new node in the graph that runs after the critic says grounded, a test with a fake skill.
+Success criteria: pytest passes; the Agent Card at port 8106 lists the skill; Telegram replies show the bullets; the supervisor still finishes in under 12 steps.
+## 11.2 Medium - Semantic cache next to the exact cache
+Goal: also reuse answers for questions that mean the same thing ("What is RRF?" and "Explain reciprocal rank fusion").
+Requirements: store question vectors in a second OpenSearch index; on a cache miss, search it with k=1 and reuse the answer if similarity is above a threshold you choose; log hits in Logfire; keep the SHA-256 cache as the first, fastest check.
+Success criteria: on 20 paraphrased questions, at least 50% hit the semantic cache, and a manual check of 10 hits finds no wrong reuse.
+## 11.3 Hard - Production hardening on EKS
+Goal: QueryMesh survives load and failures on EKS.
+Requirements: HorizontalPodAutoscaler for the API and writer; PodDisruptionBudgets; HTTPS on the ALB with an ACM certificate; per-user rate limiting in the API; OpenSearch with persistent EBS storage; a GitHub Actions job that runs the Part 7 evaluation and fails the deploy if the grounded rate drops by more than 5 points.
+Success criteria: a 10-minute load test at 5 requests/second with p95 latency under 30 s and no 5xx; deleting any one pod causes no failed request; the pipeline blocks a deliberately worse prompt.
+
+# PART 12 - Cheat Sheet
+## Part 2 - connect and set up
+```
+ssh -i $env:USERPROFILE\.ssh\querymesh-key ubuntu@VM_IP
+tmux new -s qm          (new session)    tmux attach -t qm    (come back)
+Ctrl+b c  new window    Ctrl+b n  next window    Ctrl+b d  detach
+curl -LsSf https://astral.sh/uv/install.sh | sh
+cd ~/querymesh && uv venv -p 3.12 .venv && source .venv/bin/activate
+uv pip install -e ".[dev,ingest]"
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+bash scripts/start_vllm.sh        docker logs -f vllm
+bash scripts/start_opensearch.sh  curl -s localhost:9200
+nohup fakecloud --storage-mode persistent --data-path ~/fakecloud-data > ~/fakecloud.log 2>&1 &
+source scripts/use_fakecloud.sh   |   source scripts/use_aws.sh
+aws sts get-caller-identity
+```
+## Part 4 - ingestion and search
+```
+python -m querymesh.embeddings
+python -m querymesh.search setup
+python -m querymesh.ingest --query "cat:cs.CL AND abs:retrieval" --max-papers 5
+python -m querymesh.ingest --query "all:agents" --max-papers 5 --abstracts-only
+python -m querymesh.search "How does reciprocal rank fusion work?"
+curl -s localhost:9200/arxiv-chunks/_count
+aws s3 ls s3://querymesh-papers/pdfs/
+source ~/airflow-venv/bin/activate && export AIRFLOW_HOME=~/airflow && airflow standalone
+cat ~/airflow/simple_auth_manager_passwords.json.generated
+```
+## Part 5 - agents, graph, cache
+```
+python -m querymesh.llm
+python -m querymesh.graph "What are recent methods to reduce hallucination in RAG?"
+pytest -q
+python -c "from querymesh import cache; print(cache.cache_key('What is RAG?'))"
+```
+## Part 6A - servers, tracing, API, UIs
+```
+python -m querymesh.agents retriever     (also grader, writer, critic, scout)
+curl -s localhost:8101/.well-known/agent-card.json | jq
+uvicorn querymesh.api:app --host 0.0.0.0 --port 8090
+TOKEN=$(curl -s -X POST localhost:8090/token -d "username=admin&password=API_PASSWORD" | jq -r .access_token)
+curl -s -X POST localhost:8090/ask -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"question":"What is RRF?"}' | jq
+curl -N -X POST localhost:8090/ask/stream -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"question":"What is RRF?"}'
+python -m querymesh.ui_gradio     python -m querymesh.ui_telegram
+```
+## Part 6B - containers, Kubernetes, AWS
+```
+docker build --target app -t querymesh:v1 .
+docker build --target ingest -t querymesh-ingest:v1 .
+docker compose up -d     docker compose ps     docker compose logs -f api     docker compose down
+kind create cluster --config deploy/k8s/kind-config.yaml
+kind load docker-image querymesh:v1 querymesh-ingest:v1 --name querymesh
+helm lint deploy/helm/querymesh
+helm upgrade --install querymesh deploy/helm/querymesh -n querymesh --create-namespace -f deploy/helm/querymesh/values-kind.yaml
+kubectl -n querymesh get pods
+kubectl -n querymesh port-forward svc/querymesh-api 8090:80
+kubectl -n querymesh create job first-ingest --from=cronjob/querymesh-ingest
+eksctl create cluster -f deploy/aws/eksctl-cluster.yaml
+kubectl -n querymesh get ingress
+eksctl delete cluster -f deploy/aws/eksctl-cluster.yaml
+```
+## Part 7 - evaluation
+```
+python -m querymesh.evaluate build --n 30
+python -m querymesh.evaluate retrieval
+python -m querymesh.evaluate e2e --n 10
+```
+## Key facts
+§ Fact § Value
+§ Ports § vLLM 8000, Airflow 8080, API 8090, OpenSearch 9200, FakeCloud 4566, agents 8101-8105, Gradio 7860
+§ RRF score § sum over result lists of 1 / (60 + rank)
+§ Agent Card URL § http://AGENT/.well-known/agent-card.json
+§ MCP SSE URL § http://AGENT/mcp/sse
+§ A2A URL § http://AGENT/a2a
+§ Cache key § querymesh:answer: + SHA-256 of (LLM_MODEL + "|" + lower-cased, space-normalised question)
+§ Cache lifetime § 86,400 seconds (24 hours)
+§ JWT lifetime § 60 minutes, HS256, secret JWT_SECRET
+§ Loop limits § MIN_RELEVANT 2, MAX_RETRIEVALS 2, MAX_GENERATIONS 2
+§ FakeCloud account § 123456789012, keys test/test, endpoint http://localhost:4566
+§ Hyperstack billing § SHUTOFF bills, HIBERNATE does not bill the GPU, DELETE stops everything
+
+# PART 13 - Self-Test
+1. What happens if you ask a question about a topic that is not in your index at all? List the agents that run, in order.
+2. Do this: compute the RRF score (rank constant 60) of a chunk that is rank 2 in BM25 and rank 5 in vector search.
+3. What happens if you change EMBED_DIM from 1024 to 512 in .env but keep the old index?
+4. What happens if two people ask "What is RAG?" and "what  is   rag?" one minute apart?
+5. Do this: write the curl command that fetches the Agent Card of the critic agent.
+6. What happens if the scout agent is down while the retriever finds only 1 chunk (remote mode)?
+7. Why does the API keep working when Upstash Redis is unreachable?
+8. Do this: write the command that runs the ingestion CronJob once, right now, on the kind cluster.
+9. What happens if you hibernate the Hyperstack VM and later restore it: which services come back by themselves and which do you start by hand?
+10. Why does the GitHub Actions workflow need `id-token: write` and no AWS keys?
+
+# PART 14 - Sources
+[1] Hyperstack GPU pricing https://www.hyperstack.cloud/gpu-pricing
+[2] Hyperstack getting started https://docs.hyperstack.cloud/docs/getting-started/
+[3] Hyperstack VM states and billing https://docs.hyperstack.cloud/docs/billing/states-and-billing/
+[4] Hyperstack Docker-ready images https://docs.hyperstack.cloud/docs/tutorials/docker-support/
+[5] Hyperstack firewalls https://docs.hyperstack.cloud/docs/network/firewalls/
+[6] FakeCloud https://fakecloud.dev and https://github.com/faiscadev/fakecloud
+[7] FakeCloud install https://fakecloud.dev/docs/getting-started/install/
+[8] FakeCloud EKS https://fakecloud.dev/docs/services/eks/
+[9] FakeCloud ECR https://fakecloud.dev/docs/services/ecr/
+[10] arXiv API manual and terms https://info.arxiv.org/help/api/user-manual.html and https://info.arxiv.org/help/api/tou.html
+[11] arxiv Python package https://pypi.org/project/arxiv/
+[12] Docling https://github.com/docling-project/docling
+[13] Apache Airflow quick start https://airflow.apache.org/docs/apache-airflow/stable/start.html
+[14] OpenSearch hybrid query https://docs.opensearch.org/latest/query-dsl/compound/hybrid/
+[15] OpenSearch score ranker processor (RRF) https://docs.opensearch.org/latest/search-plugins/search-pipelines/score-ranker-processor/
+[16] OpenSearch Docker https://docs.opensearch.org/latest/install-and-configure/install-opensearch/docker/
+[17] Jina embeddings API https://jina.ai/embeddings/ and https://api.jina.ai/redoc
+[18] jina-embeddings-v5-text-small https://jina.ai/models/jina-embeddings-v5-text-small/
+[19] Cormack, Clarke, Buettcher: Reciprocal Rank Fusion (SIGIR 2009) https://dl.acm.org/doi/10.1145/1571941.1572114
+[20] LangGraph https://docs.langchain.com/oss/python/langgraph/overview and https://github.com/langchain-ai/langgraph
+[21] vLLM https://docs.vllm.ai
+[22] Qwen3-4B-Instruct-2507 https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507
+[23] FastMCP https://gofastmcp.com
+[24] Model Context Protocol https://modelcontextprotocol.io
+[25] A2A protocol https://a2a-protocol.org and https://github.com/a2aproject/a2a-python
+[26] Pydantic Logfire https://logfire.pydantic.dev/docs/ and pricing https://pydantic.dev/pricing
+[27] Langfuse https://langfuse.com/docs and pricing https://langfuse.com/pricing
+[28] Upstash Redis https://upstash.com/docs/redis and pricing https://upstash.com/pricing/redis
+[29] Gradio https://www.gradio.app/docs
+[30] python-telegram-bot https://docs.python-telegram-bot.org and BotFather https://core.telegram.org/bots/tutorial
+[31] PyJWT https://pyjwt.readthedocs.io and FastAPI OAuth2 + JWT https://fastapi.tiangolo.com/tutorial/security/oauth2-jwt/
+[32] kind https://kind.sigs.k8s.io/docs/user/quick-start/
+[33] kubectl https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/
+[34] Helm https://helm.sh/docs/intro/install/
+[35] OpenSearch Helm charts https://github.com/opensearch-project/helm-charts
+[36] Amazon EKS pricing https://aws.amazon.com/eks/pricing/
+[37] eksctl https://eksctl.io/installation/
+[38] AWS Load Balancer Controller https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/deploy/installation/
+[39] External Secrets Operator (AWS Secrets Manager) https://external-secrets.io/latest/provider/aws-secrets-manager/
+[40] GitHub OIDC in AWS https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws and https://github.com/aws-actions/configure-aws-credentials
+[41] AWS pricing: https://aws.amazon.com/ec2/pricing/on-demand/ , https://aws.amazon.com/vpc/pricing/ , https://aws.amazon.com/elasticloadbalancing/pricing/ , https://aws.amazon.com/secrets-manager/pricing/ , https://aws.amazon.com/ecr/pricing/
+[42] uv https://docs.astral.sh/uv/
+[43] VS Code Remote-SSH https://code.visualstudio.com/docs/remote/ssh and WinSCP https://winscp.net/eng/docs/start
+[44] AWS CLI v2 install https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
+[45] Papers: Self-RAG https://arxiv.org/abs/2310.11511 , Corrective RAG https://arxiv.org/abs/2401.15884 , RAGAS https://arxiv.org/abs/2309.15217 , ARES https://arxiv.org/abs/2311.09476 , Lost in the Middle https://arxiv.org/abs/2307.03172 , ColBERTv2 https://arxiv.org/abs/2112.01488
+[46] Anthropic: Building effective agents https://www.anthropic.com/engineering/building-effective-agents and Contextual retrieval https://www.anthropic.com/news/contextual-retrieval
+
+# ANSWER KEY
+1. Supervisor -> retriever (few or no chunks) -> grader (fewer than 2 relevant) -> supervisor rewrites the query -> retriever -> grader (still too few) -> scout (fetches fresh arXiv abstracts) -> retriever -> grader -> writer -> critic -> finish. In remote mode the retriever may already ask the scout over A2A on its first call, because it found fewer than 3 hits.
+2. 1/(60+2) + 1/(60+5) = 0.016129 + 0.015385 = 0.031514.
+3. The Jina API returns 512-number vectors, but the index field expects 1024, so indexing fails with a dimension error and searches fail too. Delete the index, run python -m querymesh.search setup, and ingest again.
+4. Both questions lower-case and space-normalise to "what is rag?", so they get the same SHA-256 key: the second one is answered from Upstash in milliseconds (cached: true).
+5. curl -s localhost:8104/.well-known/agent-card.json
+6. find_peer finds no agent with the scout skill (the card request fails and is skipped), so the retriever simply returns its 1 chunk. The supervisor then sees too few relevant chunks, retries with a rewritten query, and its own scout call fails with a connection error, which shows in the API response and in Logfire.
+7. cache.get and cache.put catch every RedisError, log a warning and behave like a cache miss, so the request continues through the agents.
+8. kubectl -n querymesh create job first-ingest --from=cronjob/querymesh-ingest
+9. vLLM and OpenSearch come back by themselves (Docker restart policy unless-stopped). FakeCloud, Airflow, tmux sessions and any python processes you started by hand must be started again; the public IP may change.
+10. The workflow asks GitHub for a short-lived OIDC token (that needs id-token: write) and AWS exchanges it for temporary credentials of the role whose trust policy names your repo. Nothing secret is stored in GitHub, and the credentials expire after the job.

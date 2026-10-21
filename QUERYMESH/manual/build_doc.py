@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent  # the QUERYMESH project folder
-BATCH_CHARS = 9000
+BATCH_JSON_CHARS = 14000  # keep every update_doc call small
 
 GREY = {"red": 0.95, "green": 0.95, "blue": 0.95}
 HEADER_GREY = {"red": 0.88, "green": 0.88, "blue": 0.88}
@@ -110,21 +110,28 @@ class Builder:
     def __init__(self, tab_id: str):
         self.tab = tab_id
         self.cursor = 1  # start of the tab's last (empty) paragraph
-        self.batches: list[list[dict]] = [[]]
-        self.batch_chars = 0
+        self.requests: list[dict] = []
         self.expected: list[str] = []
 
     def rng(self, start, end):
         return {"startIndex": start, "endIndex": end, "tabId": self.tab}
 
     def add(self, request):
-        self.batches[-1].append(request)
+        self.requests.append(request)
 
-    def maybe_new_batch(self, size):
-        if self.batch_chars and self.batch_chars + size > BATCH_CHARS:
-            self.batches.append([])
-            self.batch_chars = 0
-        self.batch_chars += size
+    def batches(self) -> list[list[dict]]:
+        """Requests run in order and use absolute positions, so any cut between two requests is safe."""
+        out, current, size = [], [], 0
+        for request in self.requests:
+            length = len(json.dumps(request, ensure_ascii=False))
+            if current and size + length > BATCH_JSON_CHARS:
+                out.append(current)
+                current, size = [], 0
+            current.append(request)
+            size += length
+        if current:
+            out.append(current)
+        return out
 
     def span_requests(self, base, spans):
         for start, end, kind in spans:
@@ -149,7 +156,6 @@ class Builder:
     def paragraphs(self, paras):
         """paras = [(style, text, spans)] inserted as one block."""
         text = "".join(p[1] + "\n" for p in paras)
-        self.maybe_new_batch(len(text))
         start = self.cursor
         self.add({"insertText": {"location": {"index": start, "tabId": self.tab}, "text": text}})
         end = start + u16(text)
@@ -192,7 +198,6 @@ class Builder:
         n_rows, n_cols = len(rows), len(rows[0])
         cells = [[parse_inline(c) for c in row] for row in rows]
         size = sum(u16(t) for row in cells for t, _ in row)
-        self.maybe_new_batch(size + 200)
         at = self.cursor - 1  # the end of the paragraph before the table
         table_start = at + 1
         stride = 2 * n_cols + 1
@@ -276,11 +281,12 @@ def build(source_path: str, tab_id: str, out_dir: str) -> None:
     out.mkdir(parents=True, exist_ok=True)
     for old in out.glob("batch_*.json"):
         old.unlink()
-    for n, requests in enumerate(b.batches, start=1):
+    batches = b.batches()
+    for n, requests in enumerate(batches, start=1):
         (out / f"batch_{n:02d}.json").write_text(json.dumps(requests, ensure_ascii=False))
     (out / "expected.txt").write_text("\n".join(b.expected))
-    sizes = [len(json.dumps(x, ensure_ascii=False)) for x in b.batches]
-    print(f"{source_path}: {len(b.batches)} batches, json sizes {sizes}, final index {b.cursor}")
+    sizes = [len(json.dumps(x, ensure_ascii=False)) for x in batches]
+    print(f"{source_path}: {len(batches)} batches, largest {max(sizes)} chars, final index {b.cursor}")
 
 
 if __name__ == "__main__":
