@@ -1,0 +1,157 @@
+<html><head><meta charset="utf-8"></head><body style="font-family:Arial">
+<h1>PART 3 - The Core Idea (read this before you write any code)</h1>
+<p>This part has no typing. Read it once from top to bottom (about 45 minutes). Every later part points back to a section here, so when something feels like magic later, come back to the matching section.</p>
+<h2>3.0 One analogy for the whole project: a research library with a team of specialists</h2>
+<p>Imagine a big university library that receives new research papers every night. You walk to the front desk and ask a question, for example &quot;How does reciprocal rank fusion combine keyword search and vector search?&quot;. You do not search the shelves yourself. A small team does it for you:</p>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Person in the library</b></td><td style="background-color:#e0e0e0"><b>Job in the library</b></td><td style="background-color:#e0e0e0"><b>The same job in QueryMesh</b></td></tr>
+<tr><td>Night clerk</td><td>Every night, takes the new papers, cuts them into index cards, files each card in two catalogues</td><td>the ingestion pipeline (arXiv API, Docling, chunking, Jina embeddings, OpenSearch), started every night by Airflow (Part 4)</td></tr>
+<tr><td>Two catalogues</td><td>One sorted by exact words, one sorted by meaning</td><td>BM25 keyword index and vector (k-NN) index inside OpenSearch (3.1, 3.2)</td></tr>
+<tr><td>Head librarian</td><td>Reads your question, decides who works next, checks the result, decides when you get your answer</td><td>the supervisor node in the LangGraph graph (3.7)</td></tr>
+<tr><td>Librarian (Retriever)</td><td>Pulls the best 8 index cards from both catalogues and merges the two lists</td><td>Retriever agent: hybrid search with RRF (3.3)</td></tr>
+<tr><td>Reviewer (Grader)</td><td>Throws away cards that do not help with your question</td><td>Grader agent: LLM relevance check</td></tr>
+<tr><td>Writer</td><td>Writes a short answer and puts the card number after every claim</td><td>Writer agent: cited answer</td></tr>
+<tr><td>Fact checker (Critic)</td><td>Checks that every claim is really on a card; sends the writer back if not</td><td>Critic agent: grounding check</td></tr>
+<tr><td>Scout</td><td>If the library has nothing on your topic, runs to the newest arXiv papers right now and files their summaries</td><td>Scout agent: live arXiv search</td></tr>
+<tr><td>Shared notebook on the desk</td><td>Everyone reads and writes the same notebook: the question, the cards, the answer, the verdict</td><td>the shared TypedDict state (3.6)</td></tr>
+<tr><td>Phone line + business cards</td><td>Each specialist has a phone number and a business card that says what they can do</td><td>MCP over SSE (the phone line) and A2A Agent Cards (the business cards) (3.8, 3.9)</td></tr>
+<tr><td>Answer book at the front desk</td><td>If someone asked exactly the same question yesterday, the clerk reads yesterday&#x27;s answer from the book</td><td>SHA-256 exact-match cache in Upstash Redis (3.10)</td></tr>
+<tr><td>Security guard</td><td>Lets you in only with a valid visitor badge</td><td>JWT login on the API (3.12)</td></tr>
+<tr><td>CCTV and a cost meter</td><td>Records who did what and how long it took, and how many words each specialist used</td><td>Logfire spans and Langfuse token traces (3.11)</td></tr>
+</table>
+<p>Keep this picture in your head. The rest of this part explains each row in plain words.</p>
+<h2>3.1 Vectors and embeddings: &quot;meaning as a list of numbers&quot;</h2>
+<p>An embedding model reads a piece of text and returns a list of numbers (a vector). Our model, Jina jina-embeddings-v5-text-small, returns 1024 numbers for any text [17][18]. Texts with similar meaning get vectors that point in a similar direction, even when they use different words.</p>
+<p>Example: &quot;car crash&quot; and &quot;vehicle collision&quot; share no words, but their vectors are close. A keyword search would miss this; a vector search finds it.</p>
+<p>How close two vectors are is measured with cosine similarity: 1.0 means the same direction (same meaning), 0 means unrelated. We ask Jina for &quot;normalized&quot; vectors (length 1), which makes this comparison fast and fair.</p>
+<p>Asymmetric tasks: Jina embeds a question and a passage slightly differently. We send task <span style="font-family:Roboto Mono">retrieval.passage</span> when we store paper chunks and task <span style="font-family:Roboto Mono">retrieval.query</span> when we embed the user&#x27;s question. Mixing them up makes search worse.</p>
+<p>1-minute check: why would vector search find a paper about &quot;LLM hallucination&quot; when you ask about &quot;models making up facts&quot;? Answer: the meanings are close, so the vectors are close, even with no shared words.</p>
+<h2>3.2 BM25: &quot;exact words, weighted cleverly&quot;</h2>
+<p>BM25 is the classic keyword-ranking formula that OpenSearch uses by default for text fields. In plain words, a chunk scores higher when:</p>
+<ul><li>it contains your query words, and contains them several times (but the 10th repetition adds much less than the 2nd);</li><li>the words are rare in the whole collection (the word &quot;ColBERT&quot; is worth far more than the word &quot;model&quot;);</li><li>the chunk is not extremely long (long chunks naturally contain more words, so they are slightly penalised).</li></ul>
+<p>BM25 is excellent for exact names, acronyms, model names and numbers (for example &quot;RRF&quot;, &quot;Qwen3&quot;, &quot;BM25&quot;, &quot;2401.15884&quot;). Vector search is weak at those. Vector search is excellent at paraphrases. That is why we use both.</p>
+<p>1-minute check: you search &quot;DPO&quot;. Which search is more reliable, BM25 or vector? Answer: BM25, because DPO is a rare exact acronym.</p>
+<h2>3.3 Hybrid search and Reciprocal Rank Fusion (RRF), with a worked example</h2>
+<p>Hybrid search runs BM25 and vector search on the same question and merges the two ranked lists into one. The problem: their scores are on different scales (a BM25 score might be 14.2, a cosine score 0.83), so you cannot simply add them.</p>
+<p>RRF solves this by ignoring the scores and using only the positions (ranks) [19]. Each list gives a document 1 / (k + rank) points, where k is a constant (we use the default rank_constant = 60 [15]). The points from both lists are added.</p>
+<p>Worked example. Question: &quot;how does RRF merge rankings?&quot;. Each search returns its top 3:</p>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Position</b></td><td style="background-color:#e0e0e0"><b>BM25 list</b></td><td style="background-color:#e0e0e0"><b>Vector list</b></td></tr>
+<tr><td>1</td><td>Paper A</td><td>Paper B</td></tr>
+<tr><td>2</td><td>Paper B</td><td>Paper D</td></tr>
+<tr><td>3</td><td>Paper C</td><td>Paper A</td></tr>
+</table>
+<p>Now compute the RRF score of each paper with k = 60:</p>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Paper</b></td><td style="background-color:#e0e0e0"><b>From BM25</b></td><td style="background-color:#e0e0e0"><b>From vector</b></td><td style="background-color:#e0e0e0"><b>RRF total</b></td><td style="background-color:#e0e0e0"><b>Final rank</b></td></tr>
+<tr><td>A</td><td>1/(60+1) = 0.016393</td><td>1/(60+3) = 0.015873</td><td>0.032266</td><td>2</td></tr>
+<tr><td>B</td><td>1/(60+2) = 0.016129</td><td>1/(60+1) = 0.016393</td><td>0.032522</td><td>1</td></tr>
+<tr><td>C</td><td>1/(60+3) = 0.015873</td><td>not in list = 0</td><td>0.015873</td><td>4</td></tr>
+<tr><td>D</td><td>not in list = 0</td><td>1/(60+2) = 0.016129</td><td>0.016129</td><td>3</td></tr>
+</table>
+<p>What to notice:</p>
+<ul><li>Paper B wins although it was first in only one list: being high in BOTH lists beats being first in one.</li><li>Papers that appear in only one list (C, D) still get a place, so no good result is lost.</li><li>A bigger k (for example 100) makes the differences between ranks smaller; a smaller k (for example 10) gives the top positions more weight. Part 7 lets you measure this.</li></ul>
+<p>In OpenSearch this is two pieces: a <span style="font-family:Roboto Mono">hybrid</span> query that holds the BM25 query and the k-NN query [14], and a search pipeline with the <span style="font-family:Roboto Mono">score-ranker-processor</span> set to <span style="font-family:Roboto Mono">rrf</span> that does the merging [15]. You create both in Part 4.</p>
+<p>1-minute check: Paper E is 2nd in BM25 and 2nd in vector. Paper F is 1st in BM25 and missing from vector. Which ranks higher? Answer: E (1/62 + 1/62 = 0.032258) beats F (1/61 = 0.016393).</p>
+<h2>3.4 Chunking: &quot;cut the paper into index cards&quot;</h2>
+<p>A research paper is 10 to 40 pages. An embedding of a whole paper would be a blurry average of everything in it, and the LLM could not read 30 papers at once anyway. So we cut each paper into chunks of about 1,500 characters (roughly 250-350 words).</p>
+<p>QueryMesh&#x27;s chunker works in two steps:</p>
+<ul><li>First it splits the Markdown that Docling produced at headings (#, ##, ###), so a chunk does not mix the end of &quot;Method&quot; with the start of &quot;Results&quot;.</li><li>Then it cuts long sections into windows of 1,500 characters that overlap by 200 characters, so a sentence on the border is never lost.</li><li>It drops the References section, because a list of paper titles confuses search.</li></ul>
+<p>Docling&#x27;s job comes before this: a PDF stores letters at x/y positions, not paragraphs. Docling reads the page layout (columns, headings, tables) and returns clean Markdown [12].</p>
+<p>1-minute check: why the 200-character overlap? Answer: a fact that sits across the cut appears whole in at least one of the two chunks.</p>
+<h2>3.5 RAG versus agentic RAG</h2>
+<p>RAG (retrieval-augmented generation) = search first, then let the LLM answer using only what was found. Plain RAG is a straight line:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">question -&gt; search -&gt; top chunks -&gt; LLM writes answer -&gt; done</pre>
+<p>The weakness: if the search returns bad chunks, the LLM still writes something, often a confident wrong answer (a hallucination).</p>
+<p>Agentic RAG adds checks and loops, so the system can notice a bad step and try again [45]:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">question -&gt; retrieve -&gt; grade the chunks
+   enough relevant chunks?   no -&gt; rewrite the query -&gt; retrieve again (max 2 times)
+                             still no -&gt; scout fetches fresh arXiv papers -&gt; retrieve again
+   yes -&gt; write the answer with [n] citations -&gt; critic checks it
+   grounded?                 no -&gt; writer tries again with the critic&#x27;s feedback (max 2 times)
+   yes -&gt; final answer</pre>
+<p>This is the &quot;retrieval -&gt; grading -&gt; generation -&gt; retry loops&quot; line of the project. The ideas come from research such as Self-RAG and Corrective RAG [45]. The loop limits (2 retrievals, 2 generations) stop the system from looping forever and burning money.</p>
+<h2>3.6 LangGraph in four words: state, nodes, edges, Command</h2>
+<p>LangGraph is a library for building programs as a graph of steps with shared memory [20].</p>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>LangGraph word</b></td><td style="background-color:#e0e0e0"><b>Plain meaning</b></td><td style="background-color:#e0e0e0"><b>In QueryMesh</b></td></tr>
+<tr><td>State</td><td>A Python dictionary that every step can read; its shape is declared with a TypedDict</td><td>QueryState: question, search_query, chunks, relevant, answer, citations, grounded, feedback, attempt counters, steps</td></tr>
+<tr><td>Node</td><td>A Python function that receives the state and returns only the keys it wants to change</td><td>supervisor, retriever, grader, writer, critic, scout</td></tr>
+<tr><td>Edge</td><td>A fixed arrow: after node X always go to node Y</td><td>every worker has an edge back to the supervisor</td></tr>
+<tr><td>Command</td><td>A node&#x27;s return value that says &quot;update these keys AND go to that node next&quot;</td><td>the supervisor returns Command(goto=&quot;grader&quot;)</td></tr>
+<tr><td>Reducer</td><td>A rule for merging a key instead of overwriting it</td><td>steps uses operator.add, so every agent&#x27;s log line is appended</td></tr>
+</table>
+<p>Why a TypedDict? It documents exactly which keys exist, so a typo like &quot;chunck&quot; is easy to spot, and every agent agrees on the same names. This is the &quot;shared TypedDict state&quot; of the project.</p>
+<p>1-minute check: the grader returns {&quot;relevant&quot;: [...], &quot;steps&quot;: [&quot;grader: 3 of 8&quot;]}. What happens to &quot;steps&quot;? Answer: the new line is appended to the old lines (reducer), it does not replace them.</p>
+<h2>3.7 Supervisor-worker: one boss, five specialists</h2>
+<p>In a supervisor-worker design, workers never talk to the user and never decide the overall plan. They do one job and report back. The supervisor reads the shared state after every job and picks the next worker [46].</p>
+<p>Our supervisor is a small set of plain rules (no LLM needed for routing), which makes it predictable and easy to test:</p>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>What the notebook says</b></td><td style="background-color:#e0e0e0"><b>Supervisor sends to</b></td></tr>
+<tr><td>nothing retrieved yet</td><td>retriever</td></tr>
+<tr><td>chunks found but not graded</td><td>grader</td></tr>
+<tr><td>at least 2 relevant chunks</td><td>writer</td></tr>
+<tr><td>fewer than 2 relevant and fewer than 2 searches done</td><td>retriever again, with a rewritten query</td></tr>
+<tr><td>still not enough and no scout yet</td><td>scout, then retriever again</td></tr>
+<tr><td>answer written, not checked</td><td>critic</td></tr>
+<tr><td>critic says not grounded and fewer than 2 drafts</td><td>writer again, with the critic&#x27;s feedback</td></tr>
+<tr><td>otherwise</td><td>END (return the answer)</td></tr>
+</table>
+<p>Why rules instead of an LLM router? A 4-billion-parameter model sometimes picks the wrong next step; rules never do. The LLM is used where language skill matters: grading, writing, checking, rewriting the query.</p>
+<h2>3.8 MCP versus A2A, and what SSE is</h2>
+<p>Both are open protocols, but for different relationships:</p>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Protocol</b></td><td style="background-color:#e0e0e0"><b>Relationship</b></td><td style="background-color:#e0e0e0"><b>What travels</b></td><td style="background-color:#e0e0e0"><b>QueryMesh use</b></td></tr>
+<tr><td>MCP (Model Context Protocol) [24]</td><td>a client calls a TOOL on a server</td><td>tool name + JSON arguments, JSON result</td><td>the supervisor calls retrieve, grade, write, critic, scout on the five agent servers</td></tr>
+<tr><td>A2A (Agent2Agent) [25]</td><td>an AGENT asks another AGENT to do a task</td><td>a message, a task with a status, an artifact (the result)</td><td>the retriever asks the scout for help when it finds too few chunks</td></tr>
+</table>
+<p>SSE (Server-Sent Events) is a simple way for a server to keep an HTTP connection open and push messages to the client as they happen. FastMCP serves each agent&#x27;s tools over SSE at <a href="http://AGENT:PORT/mcp/sse">http://AGENT:PORT/mcp/sse</a> [23]. Our API also uses SSE at /ask/stream to push each agent step to the Gradio page and the Telegram bot while the work is happening.</p>
+<p>In one sentence: MCP is how a boss uses a tool; A2A is how two colleagues hand work to each other.</p>
+<h2>3.9 Agent Cards, agent discovery and peer delegation</h2>
+<p>Every A2A agent publishes a small JSON &quot;business card&quot; at a fixed address: <a href="http://AGENT:PORT/.well-known/agent-card.json">http://AGENT:PORT/.well-known/agent-card.json</a> [25]. It holds the agent&#x27;s name, a description, the URL where it accepts A2A messages, and its skills (for example the skill id &quot;scout&quot;).</p>
+<p>Agent discovery = instead of hard-coding &quot;the scout lives on port 8105&quot;, a program reads the cards of all known agents and finds the one that offers the skill it needs. QueryMesh does this twice:</p>
+<ul><li>the supervisor reads all five cards and builds a map &quot;skill -&gt; MCP address&quot; (retrieve -&gt; <a href="http://localhost:8101/mcp/sse">http://localhost:8101/mcp/sse</a>, and so on);</li><li>the retriever, when it finds fewer than 3 chunks, searches the cards for the skill &quot;scout&quot; and sends that agent an A2A message: &quot;fetch fresh papers about this topic&quot;. That is peer delegation: one worker asking another worker directly, without going through the supervisor.</li></ul>
+<p>Benefit: you can move an agent to another machine or port, update its card, and nothing else changes.</p>
+<h2>3.10 The SHA-256 exact-match cache</h2>
+<p>Asking the five agents costs 5-30 seconds and GPU time. If the same question comes again, we can return the stored answer in milliseconds.</p>
+<p>How the key is made: the question is lower-cased and repeated spaces are removed, so &quot;What is  RAG?&quot; and &quot;what is rag?&quot; become identical. The model name is put in front (a new model must not reuse old answers). This text goes through SHA-256, which turns any text into a fixed 64-character fingerprint, for example querymesh:answer:9f86d08...  Same text = same fingerprint, always; different text = different fingerprint.</p>
+<p>The answer is stored in Upstash Redis (a hosted key-value database with a free tier [28]) for 24 hours (TTL = time to live). &quot;Exact-match&quot; means only the same normalised question hits the cache; a re-worded question goes to the agents again. That is a deliberate, safe choice: it never returns an answer to a different question.</p>
+<p>1-minute check: will &quot;What is RAG&quot; and &quot;What is RAG?&quot; hit the same cache entry? Answer: no, the question mark is a different character, so the fingerprint is different.</p>
+<h2>3.11 Spans versus token traces: two kinds of observability</h2>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Tool</b></td><td style="background-color:#e0e0e0"><b>What it records</b></td><td style="background-color:#e0e0e0"><b>Question it answers</b></td></tr>
+<tr><td>Logfire [26]</td><td>spans: a named piece of work with a start, an end and attributes, nested inside each other (API request &gt; agent call grade &gt; HTTP call to vLLM)</td><td>Where did the 18 seconds go? Which agent failed?</td></tr>
+<tr><td>Langfuse [27]</td><td>LLM generations: the exact prompt, the answer, input and output tokens, model name, latency, cost</td><td>How many tokens does one question use? Which prompt produced this bad answer?</td></tr>
+</table>
+<p>Both are free at our scale. Both stay off until you put their keys in .env, so the code works without them.</p>
+<h2>3.12 JWT login in plain words</h2>
+<p>A JWT (JSON Web Token) is a small signed text, for example eyJhbGci...  It contains claims such as &quot;sub&quot;: &quot;admin&quot; (who) and &quot;exp&quot; (when it expires, 60 minutes for us), and a signature made with our secret JWT_SECRET [31].</p>
+<p>Flow: you send your username and password once to POST /token, the API returns a JWT, and every later request carries it in the header Authorization: Bearer YOUR_TOKEN. The API checks the signature and the expiry; it never needs to look anything up. Anyone who changes one character of the token breaks the signature and gets 401 Unauthorized.</p>
+<h2>3.13 Containers, Kubernetes, Helm, ALB and the Secrets Operator</h2>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Word</b></td><td style="background-color:#e0e0e0"><b>Plain meaning</b></td></tr>
+<tr><td>Docker image</td><td>a frozen box with Linux + Python + our code + libraries; runs the same on every machine</td></tr>
+<tr><td>Container</td><td>a running copy of an image</td></tr>
+<tr><td>Docker Compose</td><td>starts several containers together from one YAML file (our 5 agents + API + Gradio)</td></tr>
+<tr><td>Kubernetes</td><td>a system that keeps containers running on a group of machines, restarts them when they crash and connects them with internal names</td></tr>
+<tr><td>Pod / Deployment / Service</td><td>a pod is one running container; a Deployment says &quot;keep N pods of this image alive&quot;; a Service gives them one stable internal address such as querymesh-api</td></tr>
+<tr><td>Helm chart</td><td>a folder of Kubernetes YAML templates with settings (values) you change per environment; one command installs or upgrades everything</td></tr>
+<tr><td>kind</td><td>Kubernetes running inside Docker containers on one machine; our free local cluster</td></tr>
+<tr><td>EKS</td><td>Amazon&#x27;s managed Kubernetes; AWS runs the control plane, you pay for it and for the worker machines [36]</td></tr>
+<tr><td>ALB + Ingress</td><td>an AWS Application Load Balancer with a public address; the Ingress object tells the AWS Load Balancer Controller which paths go to which Service [38]</td></tr>
+<tr><td>External Secrets Operator (ESO)</td><td>copies secrets from AWS Secrets Manager into Kubernetes Secrets automatically, so no password is ever written in YAML or Git [39]</td></tr>
+</table>
+<h2>3.14 FakeCloud versus real AWS</h2>
+<p>FakeCloud is a free program that pretends to be AWS on your own VM at <a href="http://localhost:4566">http://localhost:4566</a> [6]. You type the normal aws commands; only one setting (AWS_ENDPOINT_URL) decides whether they go to FakeCloud or to the real AWS.</p>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Thing</b></td><td style="background-color:#e0e0e0"><b>FakeCloud (free)</b></td><td style="background-color:#e0e0e0"><b>Real AWS (costs money)</b></td></tr>
+<tr><td>S3, ECR (docker push), Secrets Manager, IAM, STS</td><td>work for real on your VM</td><td>work for real in Amazon&#x27;s data centre</td></tr>
+<tr><td>EKS</td><td>only stores the cluster&#x27;s description; there is no Kubernetes to run pods [8]</td><td>a real cluster</td></tr>
+<tr><td>Where the pods really run in this manual</td><td>kind on the VM</td><td>EKS worker machines</td></tr>
+<tr><td>Load balancer</td><td>we use kubectl port-forward</td><td>a real ALB with a public DNS name</td></tr>
+<tr><td>Bill</td><td>US$0</td><td>EKS US$0.10/h + machines + NAT + ALB [36][41]; always tear down (Section 6B.15)</td></tr>
+</table>
+<p>The rule of this manual: do every cloud step first in the white FakeCloud column. Only when it works there, do the same step in the light-blue Real AWS column.</p>
+<p><b style="color:#1a7333">CHECKPOINT:</b> you can explain, without looking, what RRF does with two ranked lists, what the supervisor does after the grader finds only 1 relevant chunk, and the difference between MCP and A2A.</p>
+<p><b>If not:</b> re-read 3.3, 3.7 and 3.8; they are the three ideas the rest of the manual depends on most.</p>
+</body></html>

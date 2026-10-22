@@ -1,0 +1,823 @@
+<html><head><meta charset="utf-8"></head><body style="font-family:Arial">
+<h1>PART 5 - INTERMEDIATE: Agentic RAG, the supervisor and its five agents, and the answer cache</h1>
+<p>This part builds three lines of the QueryMesh project: (2) the LangGraph supervisor-worker setup with 5 specialised agents and a shared TypedDict state, (5) agentic RAG: retrieval, then grading, then generation, with retry loops, and (8) the Upstash Redis exact-match cache keyed by SHA-256.</p>
+<p>You start from the result of Part 4: OpenSearch on the VM holds arXiv chunks, and <span style="font-family:Roboto Mono">python -m querymesh.search &quot;...&quot;</span> returns hybrid results. vLLM from Section 2B.10 is still running on port 8000.</p>
+<h2>BEFORE YOU START: the words of this part</h2>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Word</b></td><td style="background-color:#e0e0e0"><b>Plain meaning</b></td></tr>
+<tr><td>LLM</td><td>large language model: the program that reads a prompt and writes text. Ours is Qwen3-4B-Instruct-2507, served by vLLM on the GPU</td></tr>
+<tr><td>prompt</td><td>the text we send to the LLM: instructions + the question + the passages</td></tr>
+<tr><td>agent</td><td>a small worker with ONE job and its own prompt (retrieve, grade, write, check, scout)</td></tr>
+<tr><td>skill</td><td>the Python function that does an agent&#x27;s job. In this part each skill runs inside one Python process; in Part 6A each agent becomes its own server</td></tr>
+<tr><td>supervisor</td><td>the boss node. It reads the shared notebook and decides which agent works next, or that the work is finished</td></tr>
+<tr><td>state</td><td>the shared notebook: a Python dictionary every agent can read and add to</td></tr>
+<tr><td>TypedDict</td><td>a Python way to say &quot;this dictionary has exactly these keys, of these types&quot;</td></tr>
+<tr><td>node</td><td>one box in the graph: a function that receives the state and returns changes to it</td></tr>
+<tr><td>edge</td><td>an arrow between two nodes: &quot;after this box, go to that box&quot;</td></tr>
+<tr><td>Command</td><td>what our supervisor returns: &quot;go to node X, and also write these values into the notebook&quot;</td></tr>
+<tr><td>structured output</td><td>forcing the LLM to answer as JSON that fits a given shape, for example {&quot;relevant&quot;: [1, 3]}</td></tr>
+<tr><td>grounded</td><td>every claim in the answer is supported by the passages (no hallucination)</td></tr>
+<tr><td>cache</td><td>a fast memory of earlier answers, so the same question is not computed twice</td></tr>
+<tr><td>SHA-256</td><td>a function that turns any text into a fixed 64-character fingerprint. The same text always gives the same fingerprint</td></tr>
+<tr><td>TTL</td><td>time to live: how many seconds a cached answer is kept before it disappears</td></tr>
+</table>
+<p>The plan of this part:</p>
+<p>5.1 to 5.4  create four files: observability.py, llm.py, skills.py, graph.py</p>
+<p>5.5 to 5.7  run the graph, watch the retry loop, and prove the routing with tests</p>
+<p>5.8 to 5.9  create the Upstash database and the cache, and prove it works</p>
+<h2>SECTION 5.0 - What, why, when</h2>
+<p><b>What:</b> a team of five agents, led by a supervisor, that turns a question into a cited, fact-checked answer. The supervisor follows a loop: retrieve passages, grade them, retry with a better query (or fetch fresh papers) if too few are relevant, write the answer, check it, and rewrite it if the check fails.</p>
+<p><b>Why:</b> plain RAG (search once, then write) fails silently when the search finds the wrong passages or when the model invents a fact. The grading step and the checking step catch both problems, and the loop gives the system a second chance.</p>
+<p><b>When:</b> use agentic RAG when answer quality matters more than speed. Each extra loop costs one or two more LLM calls (a few seconds on our GPU).</p>
+<p><b>The cache:</b> research questions repeat. When two users ask the same question, the second one gets the stored answer in milliseconds, and the GPU does no work.</p>
+<h2>SECTION 5.1 - Create querymesh/observability.py</h2>
+<p><b>WHERE:</b> VS Code (connected to the VM), Explorer panel, folder <span style="font-family:Roboto Mono">querymesh</span></p>
+<p><b>GOAL:</b> one small file that switches tracing on. llm.py (next section) needs it. Part 6A connects it to the Logfire and Langfuse websites; until then it does nothing and causes no errors.</p>
+<p><b>Step 1.</b> In the Explorer, right-click the folder <span style="font-family:Roboto Mono">querymesh</span>.</p>
+<p><b>Step 2.</b> Click <b>New File...</b>.</p>
+<p><b>Step 3.</b> Type <span style="font-family:Roboto Mono">observability.py</span> and press Enter.</p>
+<p><b>Step 4.</b> Paste the grey box below into the empty file.</p>
+<p><b>Step 5.</b> Press Ctrl+S to save.</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;Tracing: Logfire records spans (who called what, how long); Langfuse records LLM tokens.&quot;&quot;&quot;
+import os
+
+import logfire
+
+_configured = False
+
+
+def setup(service_name: str, app=None) -&gt; None:
+    &quot;&quot;&quot;Call once at the start of every process (API, each agent, UI).&quot;&quot;&quot;
+    global _configured
+    if not _configured:
+        logfire.configure(
+            service_name=service_name,
+            send_to_logfire=&quot;if-token-present&quot;,  # no LOGFIRE_TOKEN = tracing stays off, no error
+            console=False,
+        )
+        logfire.instrument_httpx()  # every outgoing HTTP call becomes a span
+        # MCP tool calls need nothing extra: the MCP SDK (mcp 2) emits OpenTelemetry spans itself
+        _configured = True
+    if app is not None:
+        logfire.instrument_fastapi(app)  # every incoming request becomes a span
+
+
+def langfuse_callbacks() -&gt; list:
+    &quot;&quot;&quot;LangChain callback that sends prompts, answers and token counts to Langfuse Cloud.&quot;&quot;&quot;
+    if not os.getenv(&quot;LANGFUSE_PUBLIC_KEY&quot;):
+        return []
+    from langfuse.langchain import CallbackHandler
+
+    return [CallbackHandler()]</pre>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
+<tr><td><span style="font-family:Roboto Mono">import logfire</span></td><td>loads Logfire, the tracing library from the makers of Pydantic. Tracing = recording which function called which, and how long each took</td></tr>
+<tr><td><span style="font-family:Roboto Mono">_configured = False</span></td><td>a flag that remembers whether setup already ran in this process. The underscore means &quot;private to this file&quot;</td></tr>
+<tr><td><span style="font-family:Roboto Mono">def setup(service_name, app=None)</span></td><td>every program (API, each agent, the web UI) calls this once at start. <span style="font-family:Roboto Mono">service_name</span> is the label you will see in the Logfire website, e.g. querymesh-api</td></tr>
+<tr><td><span style="font-family:Roboto Mono">global _configured</span></td><td>lets the function change the flag defined outside it</td></tr>
+<tr><td><span style="font-family:Roboto Mono">logfire.configure(service_name=..., send_to_logfire=&quot;if-token-present&quot;, console=False)</span></td><td>starts Logfire. <span style="font-family:Roboto Mono">if-token-present</span> means: if LOGFIRE_TOKEN is in .env, send the traces to the website; if it is empty, record nothing and show no error. <span style="font-family:Roboto Mono">console=False</span> keeps traces out of your terminal</td></tr>
+<tr><td><span style="font-family:Roboto Mono">logfire.instrument_httpx()</span></td><td>every outgoing web call made with the httpx library (Jina, the agents, the API client) becomes a timed span automatically</td></tr>
+<tr><td>comment about MCP</td><td>the MCP library version 2 already reports its own tool calls to OpenTelemetry (the standard Logfire uses), so we add nothing for it</td></tr>
+<tr><td><span style="font-family:Roboto Mono">if app is not None: logfire.instrument_fastapi(app)</span></td><td>when the caller passes the FastAPI app (only api.py does), every incoming request becomes a span too</td></tr>
+<tr><td><span style="font-family:Roboto Mono">def langfuse_callbacks()</span></td><td>returns a list with one Langfuse &quot;callback&quot; (a listener that LangChain informs about every LLM call: prompt, answer, token counts)</td></tr>
+<tr><td><span style="font-family:Roboto Mono">if not os.getenv(&quot;LANGFUSE_PUBLIC_KEY&quot;): return []</span></td><td>no Langfuse key in .env = return an empty list = no tracing, no error</td></tr>
+<tr><td><span style="font-family:Roboto Mono">from langfuse.langchain import CallbackHandler</span></td><td>imported only when needed, so the program starts fast when Langfuse is off</td></tr>
+</table>
+<p><b style="color:#1a7333">CHECKPOINT:</b> the Explorer shows <span style="font-family:Roboto Mono">querymesh/observability.py</span>, and the tab title has no white dot (a white dot means &quot;not saved&quot;).</p>
+<p><b>If not:</b> click the file tab and press Ctrl+S.</p>
+<h2>SECTION 5.2 - Create querymesh/llm.py and talk to the model once</h2>
+<p><b>WHERE:</b> VS Code Explorer, folder <span style="font-family:Roboto Mono">querymesh</span>, then the VS Code Terminal (folder <span style="font-family:Roboto Mono">~/querymesh</span>, venv active)</p>
+<p><b>GOAL:</b> one function, get_llm(), that every agent uses to reach vLLM, and a first answer from the model.</p>
+<p><b>Step 1.</b> Right-click the folder <span style="font-family:Roboto Mono">querymesh</span>.</p>
+<p><b>Step 2.</b> Click <b>New File...</b>.</p>
+<p><b>Step 3.</b> Type <span style="font-family:Roboto Mono">llm.py</span> and press Enter.</p>
+<p><b>Step 4.</b> Paste the grey box below.</p>
+<p><b>Step 5.</b> Press Ctrl+S.</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;One place that creates the chat model client (vLLM speaks the OpenAI API).&quot;&quot;&quot;
+from langchain_openai import ChatOpenAI
+
+from querymesh import config
+from querymesh.observability import langfuse_callbacks
+
+
+def get_llm(temperature: float = 0.0) -&gt; ChatOpenAI:
+    return ChatOpenAI(
+        base_url=config.LLM_BASE_URL,
+        api_key=config.LLM_API_KEY,
+        model=config.LLM_MODEL,
+        temperature=temperature,
+        max_tokens=1024,
+        timeout=120,
+        callbacks=langfuse_callbacks(),
+    )
+
+
+if __name__ == &quot;__main__&quot;:
+    print(get_llm().invoke(&quot;In one sentence, what is arXiv?&quot;).content)</pre>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
+<tr><td><span style="font-family:Roboto Mono">from langchain_openai import ChatOpenAI</span></td><td>LangChain&#x27;s client for any server that speaks the OpenAI chat API. vLLM speaks that API, so we can use it even though nothing here comes from OpenAI</td></tr>
+<tr><td><span style="font-family:Roboto Mono">def get_llm(temperature=0.0)</span></td><td>builds a ready-to-use model client. Temperature 0 = always pick the most likely words (stable answers for grading and checking); higher = more varied wording</td></tr>
+<tr><td><span style="font-family:Roboto Mono">base_url=config.LLM_BASE_URL</span></td><td>where vLLM listens: <a href="http://localhost:8000/v1">http://localhost:8000/v1</a> from .env</td></tr>
+<tr><td><span style="font-family:Roboto Mono">api_key=config.LLM_API_KEY</span></td><td>the password you gave vLLM with --api-key in Section 2B.10. Without it vLLM answers 401</td></tr>
+<tr><td><span style="font-family:Roboto Mono">model=config.LLM_MODEL</span></td><td>the name vLLM serves the model under: qwen3-4b (set by --served-model-name)</td></tr>
+<tr><td><span style="font-family:Roboto Mono">max_tokens=1024</span></td><td>the answer may be at most about 750 words; stops runaway answers</td></tr>
+<tr><td><span style="font-family:Roboto Mono">timeout=120</span></td><td>give up after 2 minutes instead of hanging forever</td></tr>
+<tr><td><span style="font-family:Roboto Mono">callbacks=langfuse_callbacks()</span></td><td>attaches the Langfuse listener when it is configured (Part 6A), otherwise an empty list</td></tr>
+<tr><td><span style="font-family:Roboto Mono">if __name__ == &quot;__main__&quot;:</span></td><td>the lines below run only when you start this file directly (python -m querymesh.llm), not when another file imports it</td></tr>
+<tr><td><span style="font-family:Roboto Mono">get_llm().invoke(&quot;...&quot;).content</span></td><td>sends one question and prints only the text of the answer</td></tr>
+</table>
+<p><b>Step 6.</b> Click the Terminal panel (if it is hidden: menu <b>Terminal &gt; New Terminal</b>).</p>
+<p><b>Step 7.</b> Make sure you are in the project with the venv active:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">cd ~/querymesh &amp;&amp; source .venv/bin/activate</pre>
+<p><b>Step 8.</b> Check that vLLM is up (it can take 2-4 minutes after a VM restart):</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:8000/v1/models -H &quot;Authorization: Bearer $(grep ^LLM_API_KEY .env | cut -d= -f2)&quot; | jq -r &#x27;.data[0].id&#x27;</pre>
+<p><b>You should see:</b> qwen3-4b</p>
+<p><b>Step 9.</b> Ask the model one question through llm.py:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">python -m querymesh.llm</pre>
+<p><b>You should see:</b> one sentence such as &quot;arXiv is a free online repository of research papers...&quot;. The exact words differ every time.</p>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>If you see...</b></td><td style="background-color:#e0e0e0"><b>It means...</b></td><td style="background-color:#e0e0e0"><b>Do this next</b></td></tr>
+<tr><td>Connection refused / ConnectError</td><td>vLLM is not running or still loading</td><td>run <span style="font-family:Roboto Mono">docker logs --tail 20 vllm</span>; wait for &quot;Application startup complete&quot;; if the container is missing run <span style="font-family:Roboto Mono">bash scripts/start_vllm.sh</span></td></tr>
+<tr><td>401 Unauthorized</td><td>LLM_API_KEY in .env is not the key vLLM was started with</td><td>run <span style="font-family:Roboto Mono">bash scripts/start_vllm.sh</span> again (it reads the key from .env)</td></tr>
+<tr><td>404 model qwen3-4b does not exist</td><td>LLM_MODEL in .env differs from --served-model-name</td><td>set <span style="font-family:Roboto Mono">LLM_MODEL=qwen3-4b</span> in .env</td></tr>
+<tr><td>ModuleNotFoundError: querymesh</td><td>the venv is not active or you are not in ~/querymesh</td><td>repeat Step 7</td></tr>
+</table>
+<p><b style="color:#1a7333">CHECKPOINT:</b> <span style="font-family:Roboto Mono">python -m querymesh.llm</span> prints a sentence about arXiv.</p>
+<p><b>If not:</b> use the table above; the most common cause is that vLLM is still loading the model.</p>
+<h2>SECTION 5.3 - Create querymesh/skills.py (the brains of the five agents)</h2>
+<p><b>WHERE:</b> VS Code Explorer, folder <span style="font-family:Roboto Mono">querymesh</span></p>
+<p><b>GOAL:</b> five plain Python functions, one per agent, plus the query rewriter the supervisor uses. Each can be tested alone.</p>
+<p><b>Step 1.</b> Right-click the folder <span style="font-family:Roboto Mono">querymesh</span>.</p>
+<p><b>Step 2.</b> Click <b>New File...</b>.</p>
+<p><b>Step 3.</b> Type <span style="font-family:Roboto Mono">skills.py</span> and press Enter.</p>
+<p><b>Step 4.</b> Paste the grey box below.</p>
+<p><b>Step 5.</b> Press Ctrl+S.</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;The brains of the five agents. Each skill is a plain Python function you can test alone.&quot;&quot;&quot;
+import re
+
+from pydantic import BaseModel, Field
+
+from querymesh import config, ingest, search
+from querymesh.llm import get_llm
+
+
+def numbered(chunks: list[dict]) -&gt; str:
+    return &quot;\n\n&quot;.join(
+        f&quot;[{n}] ({c[&#x27;paper_id&#x27;]}) {c[&#x27;title&#x27;]}\n{c[&#x27;text&#x27;][:1200]}&quot;
+        for n, c in enumerate(chunks, start=1)
+    )
+
+
+# 1. Retriever agent
+def retrieve(query: str, k: int = config.TOP_K) -&gt; list[dict]:
+    &quot;&quot;&quot;Hybrid search (BM25 + vectors + RRF) over the indexed arXiv chunks.&quot;&quot;&quot;
+    return search.hybrid_search(query, k)
+
+
+# 2. Grader agent
+class GradeResult(BaseModel):
+    relevant: list[int] = Field(description=&quot;Numbers of the passages that help answer the question&quot;)
+
+
+def grade(question: str, chunks: list[dict]) -&gt; list[dict]:
+    &quot;&quot;&quot;Keep only the chunks that really help to answer the question.&quot;&quot;&quot;
+    if not chunks:
+        return []
+    prompt = (
+        &quot;You grade search results for a research assistant.\n&quot;
+        f&quot;Question: {question}\n\nPassages:\n{numbered(chunks)}\n\n&quot;
+        &quot;Return the numbers of the passages that contain information useful for answering &quot;
+        &quot;the question. Return an empty list if none are useful.&quot;
+    )
+    result = get_llm().with_structured_output(GradeResult).invoke(prompt)
+    keep = {n for n in result.relevant if 1 &lt;= n &lt;= len(chunks)}
+    return [c for n, c in enumerate(chunks, start=1) if n in keep]
+
+
+# 3. Writer agent
+def write(question: str, chunks: list[dict], feedback: str = &quot;&quot;) -&gt; dict:
+    &quot;&quot;&quot;Write an answer that cites the passages as [1], [2], ...&quot;&quot;&quot;
+    prompt = (
+        &quot;You are QueryMesh, a research assistant for arXiv papers.\n&quot;
+        &quot;Answer the question using ONLY the passages below. After every claim put the &quot;
+        &quot;passage number in square brackets, like [2]. If the passages are not enough, say &quot;
+        &quot;what is missing. Use at most 250 words.\n\n&quot;
+        f&quot;Question: {question}\n\nPassages:\n{numbered(chunks)}\n&quot;
+    )
+    if feedback:
+        prompt += f&quot;\nA reviewer rejected your previous answer for this reason: {feedback}\nFix it.\n&quot;
+    answer = get_llm(temperature=0.2).invoke(prompt).content
+    cited = sorted({int(n) for n in re.findall(r&quot;\[(\d+)\]&quot;, answer) if 1 &lt;= int(n) &lt;= len(chunks)})
+    citations = [
+        {&quot;n&quot;: n, &quot;paper_id&quot;: chunks[n - 1][&quot;paper_id&quot;], &quot;title&quot;: chunks[n - 1][&quot;title&quot;],
+         &quot;url&quot;: chunks[n - 1][&quot;url&quot;]}
+        for n in cited
+    ]
+    return {&quot;answer&quot;: answer, &quot;citations&quot;: citations}
+
+
+# 4. Critic agent
+class Verdict(BaseModel):
+    grounded: bool = Field(description=&quot;True if every claim is supported by the passages&quot;)
+    feedback: str = Field(description=&quot;If not grounded: which claim is unsupported, else empty&quot;)
+
+
+def critic(question: str, answer: str, chunks: list[dict]) -&gt; dict:
+    &quot;&quot;&quot;Check that the answer only says things the passages support (no hallucination).&quot;&quot;&quot;
+    prompt = (
+        &quot;You are a strict fact checker.\n&quot;
+        f&quot;Question: {question}\n\nPassages:\n{numbered(chunks)}\n\nAnswer to check:\n{answer}\n\n&quot;
+        &quot;Is every claim in the answer supported by the passages?&quot;
+    )
+    return get_llm().with_structured_output(Verdict).invoke(prompt).model_dump()
+
+
+# 5. Scout agent
+STOPWORDS = {&quot;what&quot;, &quot;which&quot;, &quot;when&quot;, &quot;where&quot;, &quot;does&quot;, &quot;about&quot;, &quot;with&quot;, &quot;from&quot;, &quot;that&quot;,
+             &quot;this&quot;, &quot;there&quot;, &quot;their&quot;, &quot;into&quot;, &quot;have&quot;, &quot;between&quot;, &quot;explain&quot;, &quot;compare&quot;}
+
+
+def topic_to_arxiv_query(topic: str) -&gt; str:
+    words = [w for w in re.findall(r&quot;[a-zA-Z0-9-]+&quot;, topic.lower())
+             if len(w) &gt; 3 and w not in STOPWORDS]
+    return &quot; AND &quot;.join(f&quot;all:{w}&quot; for w in words[:4]) or &quot;cat:cs.CL&quot;
+
+
+def scout(topic: str, max_papers: int = 5) -&gt; dict:
+    &quot;&quot;&quot;Find fresh papers on arXiv right now and index their abstracts.&quot;&quot;&quot;
+    return ingest.ingest_abstracts(topic_to_arxiv_query(topic), max_papers)
+
+
+# Used by the supervisor itself when the first search finds too little
+def rewrite_query(question: str, previous_query: str) -&gt; str:
+    prompt = (
+        &quot;A search for research papers returned too few relevant passages.\n&quot;
+        f&quot;Original question: {question}\nPrevious search query: {previous_query}\n&quot;
+        &quot;Write ONE better search query (keywords and synonyms, no explanation).&quot;
+    )
+    return get_llm(temperature=0.3).invoke(prompt).content.strip().strip(&#x27;&quot;&#x27;)[:300]</pre>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
+<tr><td><span style="font-family:Roboto Mono">from pydantic import BaseModel, Field</span></td><td>Pydantic describes the exact JSON shape we want back from the LLM</td></tr>
+<tr><td><span style="font-family:Roboto Mono">def numbered(chunks)</span></td><td>turns a list of chunks into text the LLM can read: &quot;[1] (2510.01234) Title&quot; then the chunk text. The numbers are how the LLM refers to passages</td></tr>
+<tr><td><span style="font-family:Roboto Mono">c[&#x27;text&#x27;][:1200]</span></td><td>only the first 1,200 characters of each chunk, so 8 chunks fit easily in the prompt</td></tr>
+<tr><td><span style="font-family:Roboto Mono">def retrieve(query, k=config.TOP_K)</span></td><td>agent 1, the Retriever: runs the hybrid search from Part 4 and returns the best k chunks (k = 8 from .env)</td></tr>
+<tr><td><span style="font-family:Roboto Mono">class GradeResult(BaseModel): relevant: list[int]</span></td><td>the JSON shape the Grader must return: a list of passage numbers, e.g. {&quot;relevant&quot;: [1, 4]}</td></tr>
+<tr><td><span style="font-family:Roboto Mono">Field(description=...)</span></td><td>this description is sent to the LLM as part of the JSON schema, so it knows what the numbers mean</td></tr>
+<tr><td><span style="font-family:Roboto Mono">def grade(question, chunks)</span></td><td>agent 2, the Grader: keeps only the chunks that help answer the question</td></tr>
+<tr><td><span style="font-family:Roboto Mono">if not chunks: return []</span></td><td>nothing to grade = no LLM call</td></tr>
+<tr><td><span style="font-family:Roboto Mono">get_llm().with_structured_output(GradeResult).invoke(prompt)</span></td><td>asks vLLM to answer ONLY with JSON that fits GradeResult (vLLM enforces the schema while it writes), and turns that JSON into a Python object</td></tr>
+<tr><td><span style="font-family:Roboto Mono">keep = {n for n in result.relevant if 1 &lt;= n &lt;= len(chunks)}</span></td><td>ignore any number the model invented that is not a real passage number</td></tr>
+<tr><td><span style="font-family:Roboto Mono">return [c for n, c in enumerate(chunks, start=1) if n in keep]</span></td><td>return the kept chunks in their original order</td></tr>
+<tr><td><span style="font-family:Roboto Mono">def write(question, chunks, feedback=&quot;&quot;)</span></td><td>agent 3, the Writer: writes the answer and must cite passages as [1], [2]</td></tr>
+<tr><td>&quot;Answer the question using ONLY the passages below&quot;</td><td>the core RAG instruction: stay inside the evidence</td></tr>
+<tr><td><span style="font-family:Roboto Mono">if feedback:</span></td><td>on a second attempt the Critic&#x27;s complaint is added, so the Writer fixes exactly that</td></tr>
+<tr><td><span style="font-family:Roboto Mono">get_llm(temperature=0.2)</span></td><td>a little variety makes the writing read naturally</td></tr>
+<tr><td><span style="font-family:Roboto Mono">re.findall(r&quot;\[(\d+)\]&quot;, answer)</span></td><td>finds every [number] in the answer</td></tr>
+<tr><td><span style="font-family:Roboto Mono">cited = sorted({...})</span></td><td>the set removes duplicates; sorted puts them in order; out-of-range numbers are dropped</td></tr>
+<tr><td><span style="font-family:Roboto Mono">citations = [{&quot;n&quot;: n, &quot;paper_id&quot;: ..., &quot;title&quot;: ..., &quot;url&quot;: ...}]</span></td><td>the source list shown under the answer, built from OUR data (never from model text, so the links are real)</td></tr>
+<tr><td><span style="font-family:Roboto Mono">class Verdict(BaseModel)</span></td><td>the Critic&#x27;s JSON shape: grounded true/false plus feedback</td></tr>
+<tr><td><span style="font-family:Roboto Mono">def critic(question, answer, chunks)</span></td><td>agent 4, the Critic: a strict fact checker that compares the answer with the passages</td></tr>
+<tr><td><span style="font-family:Roboto Mono">.model_dump()</span></td><td>turns the Pydantic object into a normal dictionary {&quot;grounded&quot;: ..., &quot;feedback&quot;: ...}</td></tr>
+<tr><td><span style="font-family:Roboto Mono">STOPWORDS = {...}</span></td><td>common question words that make poor arXiv search terms</td></tr>
+<tr><td><span style="font-family:Roboto Mono">def topic_to_arxiv_query(topic)</span></td><td>turns &quot;What is reciprocal rank fusion?&quot; into &quot;all:reciprocal AND all:rank AND all:fusion&quot; (arXiv search syntax; all: means any field)</td></tr>
+<tr><td><span style="font-family:Roboto Mono">len(w) &gt; 3 and w not in STOPWORDS</span></td><td>keep words longer than 3 letters that are not stop words</td></tr>
+<tr><td><span style="font-family:Roboto Mono">words[:4]</span></td><td>at most 4 words, so the arXiv search does not become too narrow</td></tr>
+<tr><td><span style="font-family:Roboto Mono">or &quot;cat:cs.CL&quot;</span></td><td>if no word is left, fall back to the computational linguistics category</td></tr>
+<tr><td><span style="font-family:Roboto Mono">def scout(topic, max_papers=5)</span></td><td>agent 5, the Scout: asks arXiv for fresh papers right now and indexes their abstracts (fast, no PDF parsing). The nightly Airflow job adds full texts</td></tr>
+<tr><td><span style="font-family:Roboto Mono">def rewrite_query(question, previous_query)</span></td><td>not an agent: the supervisor uses it to write a better search query after a poor search</td></tr>
+<tr><td><span style="font-family:Roboto Mono">.strip().strip(&#x27;&quot;&#x27;)[:300]</span></td><td>remove spaces, surrounding quotes, and cut to 300 characters</td></tr>
+</table>
+<p><b>Step 6.</b> In the Terminal, try the Retriever skill:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">python -c &quot;from querymesh import skills; print([c[&#x27;paper_id&#x27;] for c in skills.retrieve(&#x27;retrieval augmented generation&#x27;, 5)])&quot;</pre>
+<p><b>You should see:</b> a list of 5 arXiv ids such as [&#x27;2510.01234&#x27;, &#x27;2510.01234&#x27;, &#x27;2509.09876&#x27;, ...]. The same id can appear twice: two chunks of one paper.</p>
+<p><b>Step 7.</b> Try the Grader skill on those chunks:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">python -c &quot;from querymesh import skills; q=&#x27;How does retrieval augmented generation reduce hallucination?&#x27;; c=skills.retrieve(q, 5); print(len(c), &#x27;-&gt;&#x27;, len(skills.grade(q, c)))&quot;</pre>
+<p><b>You should see:</b> something like 5 -&gt; 3 (5 chunks in, 3 judged relevant). Any number from 0 to 5 is possible.</p>
+<p><b>Step 8.</b> Try the Writer and the Critic together:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">python -c &quot;from querymesh import skills; q=&#x27;How does retrieval augmented generation reduce hallucination?&#x27;; c=skills.grade(q, skills.retrieve(q, 5)); w=skills.write(q, c); print(w[&#x27;answer&#x27;]); print(skills.critic(q, w[&#x27;answer&#x27;], c))&quot;</pre>
+<p><b>You should see:</b> a short answer with [1] style citations, then a line like {&#x27;grounded&#x27;: True, &#x27;feedback&#x27;: &#x27;&#x27;}.</p>
+<p><b>Step 9.</b> Try the Scout skill (it calls arXiv, so it waits about 3 seconds):</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">python -c &quot;from querymesh import skills; print(skills.topic_to_arxiv_query(&#x27;What is speculative decoding?&#x27;)); print(skills.scout(&#x27;speculative decoding&#x27;, 2))&quot;</pre>
+<p><b>You should see:</b> all:speculative AND all:decoding, then {&#x27;added&#x27;: [&#x27;2510.xxxxx&#x27;, &#x27;2510.yyyyy&#x27;]}. If both papers were already indexed you see {&#x27;added&#x27;: []}.</p>
+<p><b style="color:#bf1a1a">Watch out:</b> the Grader returning 0 is not an error. It means your index has nothing on that question yet; the supervisor in Section 5.4 handles exactly this case.</p>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>If you see...</b></td><td style="background-color:#e0e0e0"><b>It means...</b></td><td style="background-color:#e0e0e0"><b>Do this next</b></td></tr>
+<tr><td>JINA_API_KEY is empty</td><td>.env has no Jina key</td><td>fill JINA_API_KEY in .env (Section 2B.8)</td></tr>
+<tr><td>index_not_found_exception</td><td>no index yet</td><td>run Part 4 (Sections 4.2 and 4.5)</td></tr>
+<tr><td>BadRequestError ... response_format</td><td>the server does not accept JSON schema output</td><td>make sure LLM_BASE_URL points to vLLM (it supports it), not to another server</td></tr>
+<tr><td>ValidationError for GradeResult</td><td>the model returned broken JSON (rare with vLLM)</td><td>run the step again</td></tr>
+</table>
+<p><b style="color:#1a7333">CHECKPOINT:</b> Steps 6 to 9 each print a result without a Traceback.</p>
+<p><b>If not:</b> read the last line of the error and use the table above.</p>
+<h2>SECTION 5.4 - Create querymesh/graph.py (the supervisor, the shared state, the loop)</h2>
+<p><b>WHERE:</b> VS Code Explorer, folder <span style="font-family:Roboto Mono">querymesh</span></p>
+<p><b>GOAL:</b> the LangGraph state machine: one supervisor routes the question through the five agents, with retry loops, until the answer is grounded or the limits are reached.</p>
+<p><b>Step 1.</b> Right-click the folder <span style="font-family:Roboto Mono">querymesh</span>.</p>
+<p><b>Step 2.</b> Click <b>New File...</b>.</p>
+<p><b>Step 3.</b> Type <span style="font-family:Roboto Mono">graph.py</span> and press Enter.</p>
+<p><b>Step 4.</b> Paste the grey box below.</p>
+<p><b>Step 5.</b> Press Ctrl+S.</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;The supervisor-worker graph: one supervisor routes the question through five agents.&quot;&quot;&quot;
+import asyncio
+import json
+import operator
+import sys
+from typing import Annotated, TypedDict
+
+import logfire
+from langgraph.graph import END, START, StateGraph
+from langgraph.types import Command
+
+from querymesh import config, skills
+
+
+class QueryState(TypedDict, total=False):
+    &quot;&quot;&quot;The shared notebook every agent reads from and writes to.&quot;&quot;&quot;
+    question: str
+    search_query: str
+    chunks: list[dict]
+    relevant: list[dict] | None
+    answer: str | None
+    citations: list[dict]
+    grounded: bool | None
+    feedback: str
+    retrieval_attempts: int
+    generation_attempts: int
+    scouted: bool
+    steps: Annotated[list[str], operator.add]  # every agent appends a line; nothing is lost
+
+
+# ---------- how the supervisor reaches an agent ----------
+LOCAL_SKILLS = {
+    &quot;retrieve&quot;: skills.retrieve,
+    &quot;grade&quot;: skills.grade,
+    &quot;write&quot;: skills.write,
+    &quot;critic&quot;: skills.critic,
+    &quot;scout&quot;: skills.scout,
+}
+_registry: dict[str, str] = {}  # skill name -&gt; MCP URL, filled by agent discovery
+
+
+async def call_skill(name: str, **kwargs):
+    &quot;&quot;&quot;local mode: run the Python function. remote mode: call the agent&#x27;s MCP tool over SSE.&quot;&quot;&quot;
+    with logfire.span(&quot;agent call {name}&quot;, name=name, mode=config.WORKER_MODE):
+        if config.WORKER_MODE == &quot;local&quot;:
+            return await asyncio.to_thread(LOCAL_SKILLS[name], **kwargs)
+        from fastmcp import Client
+
+        from querymesh.discovery import discover_agents
+
+        if not _registry:
+            _registry.update(await discover_agents(config.AGENT_URLS))
+        async with Client(_registry[name], timeout=300) as mcp:
+            result = await mcp.call_tool(name, kwargs)
+        return result.data if result.data is not None else json.loads(result.content[0].text)
+
+
+# ---------- the supervisor ----------
+def supervisor(state: QueryState) -&gt; Command:
+    &quot;&quot;&quot;Read the notebook and decide which agent works next (or finish).&quot;&quot;&quot;
+    if state.get(&quot;retrieval_attempts&quot;, 0) == 0:
+        return Command(goto=&quot;retriever&quot;, update={&quot;search_query&quot;: state[&quot;question&quot;]})
+
+    if state.get(&quot;answer&quot;) is None:
+        if state.get(&quot;relevant&quot;) is None:
+            return Command(goto=&quot;grader&quot;)
+        if len(state[&quot;relevant&quot;]) &gt;= config.MIN_RELEVANT:
+            return Command(goto=&quot;writer&quot;)
+        if state[&quot;retrieval_attempts&quot;] &lt; config.MAX_RETRIEVALS:
+            better = skills.rewrite_query(state[&quot;question&quot;], state[&quot;search_query&quot;])
+            return Command(goto=&quot;retriever&quot;, update={
+                &quot;search_query&quot;: better, &quot;steps&quot;: [f&quot;supervisor: search again with &#x27;{better}&#x27;&quot;]})
+        if not state.get(&quot;scouted&quot;):
+            return Command(goto=&quot;scout&quot;)
+        return Command(goto=&quot;writer&quot;)  # write with what we have; the writer says what is missing
+
+    if state.get(&quot;grounded&quot;) is None:
+        return Command(goto=&quot;critic&quot;)
+    if not state[&quot;grounded&quot;] and state[&quot;generation_attempts&quot;] &lt; config.MAX_GENERATIONS:
+        return Command(goto=&quot;writer&quot;)
+    return Command(goto=END)
+
+
+# ---------- the five workers ----------
+async def retriever(state: QueryState) -&gt; dict:
+    chunks = await call_skill(&quot;retrieve&quot;, query=state[&quot;search_query&quot;], k=config.TOP_K)
+    attempts = state.get(&quot;retrieval_attempts&quot;, 0) + 1
+    return {&quot;chunks&quot;: chunks, &quot;relevant&quot;: None, &quot;retrieval_attempts&quot;: attempts,
+            &quot;steps&quot;: [f&quot;retriever: {len(chunks)} chunks (attempt {attempts})&quot;]}
+
+
+async def grader(state: QueryState) -&gt; dict:
+    relevant = await call_skill(&quot;grade&quot;, question=state[&quot;question&quot;], chunks=state[&quot;chunks&quot;])
+    return {&quot;relevant&quot;: relevant,
+            &quot;steps&quot;: [f&quot;grader: {len(relevant)} of {len(state[&#x27;chunks&#x27;])} chunks are relevant&quot;]}
+
+
+async def writer(state: QueryState) -&gt; dict:
+    chunks = state.get(&quot;relevant&quot;) or state.get(&quot;chunks&quot;, [])
+    result = await call_skill(&quot;write&quot;, question=state[&quot;question&quot;], chunks=chunks,
+                              feedback=state.get(&quot;feedback&quot;, &quot;&quot;))
+    attempts = state.get(&quot;generation_attempts&quot;, 0) + 1
+    return {&quot;answer&quot;: result[&quot;answer&quot;], &quot;citations&quot;: result[&quot;citations&quot;], &quot;grounded&quot;: None,
+            &quot;generation_attempts&quot;: attempts, &quot;steps&quot;: [f&quot;writer: answer drafted (attempt {attempts})&quot;]}
+
+
+async def critic(state: QueryState) -&gt; dict:
+    chunks = state.get(&quot;relevant&quot;) or state.get(&quot;chunks&quot;, [])
+    verdict = await call_skill(&quot;critic&quot;, question=state[&quot;question&quot;], answer=state[&quot;answer&quot;],
+                               chunks=chunks)
+    return {&quot;grounded&quot;: verdict[&quot;grounded&quot;], &quot;feedback&quot;: verdict[&quot;feedback&quot;],
+            &quot;steps&quot;: [f&quot;critic: grounded={verdict[&#x27;grounded&#x27;]}&quot;]}
+
+
+async def scout(state: QueryState) -&gt; dict:
+    result = await call_skill(&quot;scout&quot;, topic=state[&quot;question&quot;], max_papers=5)
+    return {&quot;scouted&quot;: True, &quot;retrieval_attempts&quot;: 0, &quot;chunks&quot;: [], &quot;relevant&quot;: None,
+            &quot;steps&quot;: [f&quot;scout: added {len(result[&#x27;added&#x27;])} new papers from arXiv&quot;]}
+
+
+# ---------- wire it together ----------
+def build_graph():
+    builder = StateGraph(QueryState)
+    builder.add_node(&quot;supervisor&quot;, supervisor, destinations=(&quot;retriever&quot;, &quot;grader&quot;, &quot;writer&quot;, &quot;critic&quot;, &quot;scout&quot;, END))
+    for name, node in [(&quot;retriever&quot;, retriever), (&quot;grader&quot;, grader), (&quot;writer&quot;, writer),
+                       (&quot;critic&quot;, critic), (&quot;scout&quot;, scout)]:
+        builder.add_node(name, node)
+        builder.add_edge(name, &quot;supervisor&quot;)  # every worker reports back to the supervisor
+    builder.add_edge(START, &quot;supervisor&quot;)
+    return builder.compile()
+
+
+graph = build_graph()
+
+
+async def stream_answer(question: str):
+    &quot;&quot;&quot;Yield (&#x27;step&#x27;, text) while the agents work, then (&#x27;final&#x27;, result_dict).&quot;&quot;&quot;
+    state: dict = {&quot;question&quot;: question}
+    async for update in graph.astream(state, stream_mode=&quot;updates&quot;, config={&quot;recursion_limit&quot;: 40}):
+        for node, change in update.items():
+            if not change:
+                continue
+            state.update({k: v for k, v in change.items() if k != &quot;steps&quot;})
+            for line in change.get(&quot;steps&quot;, []):
+                yield &quot;step&quot;, line
+    yield &quot;final&quot;, {&quot;answer&quot;: state.get(&quot;answer&quot;, &quot;&quot;), &quot;citations&quot;: state.get(&quot;citations&quot;, []),
+                    &quot;grounded&quot;: state.get(&quot;grounded&quot;)}
+
+
+async def ask(question: str) -&gt; dict:
+    final = {}
+    async for kind, value in stream_answer(question):
+        if kind == &quot;step&quot;:
+            print(&quot;  ..&quot;, value)
+        else:
+            final = value
+    return final
+
+
+if __name__ == &quot;__main__&quot;:
+    result = asyncio.run(ask(&quot; &quot;.join(sys.argv[1:]) or &quot;How does reciprocal rank fusion work?&quot;))
+    print(&quot;\n&quot; + result[&quot;answer&quot;] + &quot;\n&quot;)
+    for c in result[&quot;citations&quot;]:
+        print(f&quot;[{c[&#x27;n&#x27;]}] {c[&#x27;title&#x27;]}  {c[&#x27;url&#x27;]}&quot;)</pre>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
+<tr><td><span style="font-family:Roboto Mono">import operator</span></td><td>gives us operator.add, the &quot;+&quot; for lists, used to merge the steps lists</td></tr>
+<tr><td><span style="font-family:Roboto Mono">from typing import Annotated, TypedDict</span></td><td>Python tools to describe the shape of the shared notebook</td></tr>
+<tr><td><span style="font-family:Roboto Mono">import logfire</span></td><td>to time every agent call (visible in Part 6A)</td></tr>
+<tr><td><span style="font-family:Roboto Mono">from langgraph.graph import END, START, StateGraph</span></td><td>StateGraph builds the graph; START is the entry point; END means &quot;finished&quot;</td></tr>
+<tr><td><span style="font-family:Roboto Mono">from langgraph.types import Command</span></td><td>the object the supervisor returns: where to go next + what to write</td></tr>
+<tr><td><span style="font-family:Roboto Mono">class QueryState(TypedDict, total=False)</span></td><td>THE shared TypedDict state. <span style="font-family:Roboto Mono">total=False</span> = keys may be missing at the start (only question is given)</td></tr>
+<tr><td><span style="font-family:Roboto Mono">question: str</span></td><td>the user&#x27;s original question, never changed</td></tr>
+<tr><td><span style="font-family:Roboto Mono">search_query: str</span></td><td>the text actually searched; the supervisor may rewrite it</td></tr>
+<tr><td><span style="font-family:Roboto Mono">chunks: list[dict]</span></td><td>what the Retriever found</td></tr>
+<tr><td><span style="font-family:Roboto Mono">relevant: list[dict] or None</span></td><td>what the Grader kept. None means &quot;not graded yet&quot;</td></tr>
+<tr><td><span style="font-family:Roboto Mono">answer: str or None</span></td><td>the Writer&#x27;s answer. None means &quot;no answer yet&quot;</td></tr>
+<tr><td><span style="font-family:Roboto Mono">citations: list[dict]</span></td><td>the sources of the answer</td></tr>
+<tr><td><span style="font-family:Roboto Mono">grounded: bool or None</span></td><td>the Critic&#x27;s verdict. None means &quot;not checked yet&quot;</td></tr>
+<tr><td><span style="font-family:Roboto Mono">feedback: str</span></td><td>the Critic&#x27;s complaint, passed back to the Writer</td></tr>
+<tr><td><span style="font-family:Roboto Mono">retrieval_attempts</span>, <span style="font-family:Roboto Mono">generation_attempts</span></td><td>counters that stop endless loops</td></tr>
+<tr><td><span style="font-family:Roboto Mono">scouted: bool</span></td><td>True after the Scout has fetched fresh papers once</td></tr>
+<tr><td><span style="font-family:Roboto Mono">steps: Annotated[list[str], operator.add]</span></td><td>a reducer: when a node returns steps, LangGraph ADDS them to the existing list instead of replacing it. This gives the progress log the UI shows</td></tr>
+<tr><td><span style="font-family:Roboto Mono">LOCAL_SKILLS = {...}</span></td><td>a phone book: skill name -&gt; Python function (used in local mode)</td></tr>
+<tr><td><span style="font-family:Roboto Mono">_registry: dict[str, str] = {}</span></td><td>the phone book for remote mode (Part 6A): skill name -&gt; MCP address, filled by agent discovery</td></tr>
+<tr><td><span style="font-family:Roboto Mono">async def call_skill(name, **kwargs)</span></td><td>the ONE place where the supervisor reaches an agent. <span style="font-family:Roboto Mono">**kwargs</span> = the named arguments, e.g. query=..., k=...</td></tr>
+<tr><td><span style="font-family:Roboto Mono">with logfire.span(&quot;agent call {name}&quot;, ...)</span></td><td>records one timed span per agent call</td></tr>
+<tr><td><span style="font-family:Roboto Mono">if config.WORKER_MODE == &quot;local&quot;:</span></td><td>local mode (this part): call the function in this process</td></tr>
+<tr><td><span style="font-family:Roboto Mono">await asyncio.to_thread(LOCAL_SKILLS[name], **kwargs)</span></td><td>runs the normal (blocking) function in a helper thread, so the async graph keeps working</td></tr>
+<tr><td><span style="font-family:Roboto Mono">from fastmcp import Client</span> ... <span style="font-family:Roboto Mono">call_tool(name, kwargs)</span></td><td>remote mode (Part 6A): call the agent&#x27;s MCP tool over SSE</td></tr>
+<tr><td><span style="font-family:Roboto Mono">_registry.update(await discover_agents(config.AGENT_URLS))</span></td><td>the first remote call reads every agent&#x27;s Agent Card to learn who offers which skill</td></tr>
+<tr><td><span style="font-family:Roboto Mono">result.data if result.data is not None else json.loads(...)</span></td><td>FastMCP returns the tool result already decoded in .data; the fallback decodes the raw text</td></tr>
+<tr><td><span style="font-family:Roboto Mono">def supervisor(state)</span></td><td>the boss. It never does the work; it only reads the notebook and decides (decision table below)</td></tr>
+<tr><td><span style="font-family:Roboto Mono">return Command(goto=&quot;retriever&quot;, update={&quot;search_query&quot;: state[&quot;question&quot;]})</span></td><td>first visit: search for the question itself</td></tr>
+<tr><td><span style="font-family:Roboto Mono">len(state[&quot;relevant&quot;]) &gt;= config.MIN_RELEVANT</span></td><td>enough relevant passages (2 by default) = go and write</td></tr>
+<tr><td><span style="font-family:Roboto Mono">skills.rewrite_query(...)</span> and <span style="font-family:Roboto Mono">&quot;steps&quot;: [...]</span></td><td>retry: write a better query and log the reason</td></tr>
+<tr><td><span style="font-family:Roboto Mono">return Command(goto=END)</span></td><td>finished: the graph stops and returns the notebook</td></tr>
+<tr><td><span style="font-family:Roboto Mono">async def retriever(state)</span></td><td>worker node: calls the Retriever, stores chunks, resets relevant to None (new chunks must be graded again), adds 1 to retrieval_attempts</td></tr>
+<tr><td><span style="font-family:Roboto Mono">async def grader(state)</span></td><td>worker node: stores the relevant chunks and logs &quot;x of y&quot;</td></tr>
+<tr><td><span style="font-family:Roboto Mono">chunks = state.get(&quot;relevant&quot;) or state.get(&quot;chunks&quot;, [])</span></td><td>the Writer uses the relevant chunks; if there are none it uses all chunks and says what is missing</td></tr>
+<tr><td><span style="font-family:Roboto Mono">&quot;grounded&quot;: None</span> in writer</td><td>a new answer must be checked again</td></tr>
+<tr><td><span style="font-family:Roboto Mono">async def critic(state)</span></td><td>worker node: stores grounded and feedback</td></tr>
+<tr><td><span style="font-family:Roboto Mono">async def scout(state)</span></td><td>worker node: fetches fresh papers, then sets retrieval_attempts back to 0 and empties chunks, so the supervisor starts a fresh search</td></tr>
+<tr><td><span style="font-family:Roboto Mono">builder = StateGraph(QueryState)</span></td><td>a new graph whose notebook has the QueryState shape</td></tr>
+<tr><td><span style="font-family:Roboto Mono">builder.add_node(&quot;supervisor&quot;, supervisor, destinations=(...))</span></td><td>adds the supervisor box; destinations lists where its Command may go (used to draw the graph)</td></tr>
+<tr><td><span style="font-family:Roboto Mono">builder.add_edge(name, &quot;supervisor&quot;)</span></td><td>every worker reports back to the supervisor: this is the supervisor-worker pattern</td></tr>
+<tr><td><span style="font-family:Roboto Mono">builder.add_edge(START, &quot;supervisor&quot;)</span></td><td>the graph always starts at the supervisor</td></tr>
+<tr><td><span style="font-family:Roboto Mono">builder.compile()</span></td><td>checks the graph and turns it into a runnable object</td></tr>
+<tr><td><span style="font-family:Roboto Mono">graph = build_graph()</span></td><td>built once when the file is imported</td></tr>
+<tr><td><span style="font-family:Roboto Mono">async def stream_answer(question)</span></td><td>runs the graph and yields progress lines while it works, then the final result. The API and UIs use this</td></tr>
+<tr><td><span style="font-family:Roboto Mono">graph.astream(state, stream_mode=&quot;updates&quot;, config={&quot;recursion_limit&quot;: 40})</span></td><td>run step by step; after each node we receive only what that node changed. recursion_limit = at most 40 node visits (a safety net against endless loops)</td></tr>
+<tr><td><span style="font-family:Roboto Mono">state.update({k: v ... if k != &quot;steps&quot;})</span></td><td>keep our own copy of the notebook up to date</td></tr>
+<tr><td><span style="font-family:Roboto Mono">yield &quot;step&quot;, line</span> / <span style="font-family:Roboto Mono">yield &quot;final&quot;, {...}</span></td><td>send progress lines, then the answer, citations and grounded flag</td></tr>
+<tr><td><span style="font-family:Roboto Mono">async def ask(question)</span></td><td>prints the progress lines and returns the final result (used on the command line and in tests)</td></tr>
+<tr><td><span style="font-family:Roboto Mono">if __name__ == &quot;__main__&quot;: ...</span></td><td><span style="font-family:Roboto Mono">python -m querymesh.graph &quot;question&quot;</span> runs the whole team and prints the answer and its sources</td></tr>
+</table>
+<p>The supervisor&#x27;s decision table (read top to bottom; the first row that matches wins):</p>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Situation in the notebook</b></td><td style="background-color:#e0e0e0"><b>Next agent</b></td><td style="background-color:#e0e0e0"><b>Why</b></td></tr>
+<tr><td>retrieval_attempts is 0</td><td>retriever (search_query = question)</td><td>nothing has been searched yet (or the Scout just added papers)</td></tr>
+<tr><td>no answer yet, relevant is None</td><td>grader</td><td>new chunks must be graded</td></tr>
+<tr><td>no answer yet, relevant has at least MIN_RELEVANT (2) chunks</td><td>writer</td><td>enough evidence</td></tr>
+<tr><td>no answer yet, too few relevant, retrieval_attempts &lt; MAX_RETRIEVALS (2)</td><td>retriever with a rewritten query</td><td>retry loop 1: search better</td></tr>
+<tr><td>no answer yet, still too few, not scouted</td><td>scout</td><td>retry loop 2: fetch fresh papers from arXiv, then search again</td></tr>
+<tr><td>no answer yet, scouted already</td><td>writer</td><td>write with what we have; the writer says what is missing</td></tr>
+<tr><td>answer exists, grounded is None</td><td>critic</td><td>every answer is checked</td></tr>
+<tr><td>grounded is False and generation_attempts &lt; MAX_GENERATIONS (2)</td><td>writer (with the Critic&#x27;s feedback)</td><td>retry loop 3: fix the answer</td></tr>
+<tr><td>anything else</td><td>END</td><td>grounded, or out of attempts</td></tr>
+</table>
+<p><b style="color:#bf1a1a">Watch out:</b> indentation is part of Python. If you paste and VS Code shows red squiggles under <span style="font-family:Roboto Mono">def</span>, the paste added spaces: press Ctrl+A, Delete, and paste again.</p>
+<p><b style="color:#1a7333">CHECKPOINT:</b> in the Terminal, <span style="font-family:Roboto Mono">python -c &quot;from querymesh.graph import graph; print(type(graph).__name__)&quot;</span> prints CompiledStateGraph.</p>
+<p><b>If not:</b> an ImportError names the file with a typo; compare it with the grey box.</p>
+<h2>SECTION 5.5 - Run the whole team on one question</h2>
+<p><b>WHERE:</b> VS Code Terminal, folder <span style="font-family:Roboto Mono">~/querymesh</span>, venv active</p>
+<p><b>GOAL:</b> see the five agents work in order and get a cited, checked answer.</p>
+<p><b>Step 1.</b> Ask a question your index can answer (Part 4 loaded papers about retrieval):</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">python -m querymesh.graph &quot;How does hybrid search combine keyword and vector retrieval?&quot;</pre>
+<p>You should see (the numbers and words differ):</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">  .. retriever: 8 chunks (attempt 1)
+  .. grader: 4 of 8 chunks are relevant
+  .. writer: answer drafted (attempt 1)
+  .. critic: grounded=True
+
+Hybrid search runs a keyword (BM25) search and a vector search side by side [1] ...
+
+[1] Some Paper Title  http://arxiv.org/abs/2510.01234v1</pre>
+<p><b>Step 2.</b> Count the lines that start with &quot;..&quot;: they are the steps list from the shared state, in the order the supervisor chose.</p>
+<p><b>Step 3.</b> Click one source link at the bottom (Ctrl+click in VS Code) to open the paper on arxiv.org in your browser.</p>
+<p><b>You should see:</b> the arXiv page of a paper whose topic matches the answer.</p>
+<p><b style="color:#bf1a1a">Watch out:</b> the first run after a VM restart is slower (vLLM warms up). A run normally takes 10 to 40 seconds on the RTX A6000.</p>
+<p><b style="color:#1a7333">CHECKPOINT:</b> the run ends with an answer, at least one [n] citation, and a source list.</p>
+<p><b>If not:</b> if the answer says the passages are not enough, your index is small; run Section 4.5 again with --max-papers 20.</p>
+<h2>SECTION 5.6 - Watch the retry loop and the Scout</h2>
+<p><b>WHERE:</b> VS Code Terminal, folder <span style="font-family:Roboto Mono">~/querymesh</span>, venv active</p>
+<p><b>GOAL:</b> see the agentic part: a weak first search, a rewritten query, then the Scout fetching fresh papers from arXiv.</p>
+<p><b>Step 1.</b> Ask about a topic that Part 4 did NOT load (Part 4 loaded retrieval papers, not speech papers):</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">python -m querymesh.graph &quot;What are recent methods for streaming speech recognition with transducers?&quot;</pre>
+<p>You should see something like:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">  .. retriever: 8 chunks (attempt 1)
+  .. grader: 0 of 8 chunks are relevant
+  .. supervisor: search again with &#x27;streaming ASR RNN-T transducer low latency speech recognition&#x27;
+  .. retriever: 8 chunks (attempt 2)
+  .. grader: 1 of 8 chunks are relevant
+  .. scout: added 5 new papers from arXiv
+  .. retriever: 8 chunks (attempt 1)
+  .. grader: 4 of 8 chunks are relevant
+  .. writer: answer drafted (attempt 1)
+  .. critic: grounded=True</pre>
+<p><b>Step 2.</b> Run the same command a second time.</p>
+<p><b>You should see:</b> the first grader line already finds relevant chunks, because the Scout&#x27;s papers are now in the index. No scout line appears.</p>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>If you see...</b></td><td style="background-color:#e0e0e0"><b>It means...</b></td><td style="background-color:#e0e0e0"><b>Do this next</b></td></tr>
+<tr><td>the first grader already finds 2 or more</td><td>your index happened to contain such papers</td><td>try a more unusual topic, e.g. &quot;protein folding with diffusion models&quot;</td></tr>
+<tr><td>scout: added 0 new papers</td><td>arXiv returned papers you already have, or nothing matched the 4 keywords</td><td>normal; the writer then says what is missing</td></tr>
+<tr><td>critic: grounded=False then writer: answer drafted (attempt 2)</td><td>retry loop 3 worked: the Critic rejected a claim and the Writer fixed it</td><td>nothing, this is the design</td></tr>
+<tr><td>GraphRecursionError</td><td>more than 40 node visits</td><td>should not happen with the default limits; check MAX_RETRIEVALS and MAX_GENERATIONS in .env are small numbers (2)</td></tr>
+</table>
+<p><b style="color:#1a7333">CHECKPOINT:</b> you have seen at least one &quot;supervisor: search again&quot; line and one &quot;scout:&quot; line.</p>
+<p><b>If not:</b> use a stranger topic (see the table).</p>
+<h2>SECTION 5.7 - Prove the routing with tests (no GPU needed)</h2>
+<p><b>WHERE:</b> VS Code Explorer, folder <span style="font-family:Roboto Mono">tests</span>, then the Terminal</p>
+<p><b>GOAL:</b> three automatic tests that check the supervisor&#x27;s decisions with fake agents. They run in 2 seconds and also run in GitHub Actions (Part 6B).</p>
+<p><b>Step 1.</b> Right-click the folder <span style="font-family:Roboto Mono">tests</span>.</p>
+<p><b>Step 2.</b> Click <b>New File...</b>.</p>
+<p><b>Step 3.</b> Type <span style="font-family:Roboto Mono">__init__.py</span> and press Enter (leave the file empty; it makes <span style="font-family:Roboto Mono">tests</span> a package so one test file can import another).</p>
+<p><b>Step 4.</b> Press Ctrl+S.</p>
+<p><b>Step 5.</b> Right-click the folder <span style="font-family:Roboto Mono">tests</span> again.</p>
+<p><b>Step 6.</b> Click <b>New File...</b>.</p>
+<p><b>Step 7.</b> Type <span style="font-family:Roboto Mono">test_graph.py</span> and press Enter.</p>
+<p><b>Step 8.</b> Paste the grey box below.</p>
+<p><b>Step 9.</b> Press Ctrl+S.</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;Test the supervisor routing with fake agents (no LLM, no OpenSearch needed).&quot;&quot;&quot;
+from querymesh import graph, skills
+
+CHUNK = {&quot;paper_id&quot;: &quot;2401.00001&quot;, &quot;title&quot;: &quot;RRF&quot;, &quot;text&quot;: &quot;RRF adds 1/(60+rank).&quot;, &quot;url&quot;: &quot;u&quot;}
+
+
+def fake_skills(monkeypatch, relevant_after_scout=False, grounded_sequence=(True,)):
+    calls = []
+    grounded = list(grounded_sequence)
+    scouted = {&quot;done&quot;: False}
+
+    def retrieve(query, k):
+        calls.append(&quot;retrieve&quot;)
+        return [CHUNK, CHUNK]
+
+    def grade(question, chunks):
+        calls.append(&quot;grade&quot;)
+        return chunks if (not relevant_after_scout or scouted[&quot;done&quot;]) else []
+
+    def write(question, chunks, feedback=&quot;&quot;):
+        calls.append(&quot;write&quot;)
+        return {&quot;answer&quot;: &quot;RRF merges rankings [1].&quot;, &quot;citations&quot;: [{&quot;n&quot;: 1, **CHUNK}]}
+
+    def critic(question, answer, chunks):
+        calls.append(&quot;critic&quot;)
+        return {&quot;grounded&quot;: grounded.pop(0), &quot;feedback&quot;: &quot;claim 2 unsupported&quot;}
+
+    def scout(topic, max_papers):
+        calls.append(&quot;scout&quot;)
+        scouted[&quot;done&quot;] = True
+        return {&quot;added&quot;: [&quot;2401.00002&quot;]}
+
+    monkeypatch.setattr(graph, &quot;LOCAL_SKILLS&quot;, {&quot;retrieve&quot;: retrieve, &quot;grade&quot;: grade, &quot;write&quot;: write,
+                                                &quot;critic&quot;: critic, &quot;scout&quot;: scout})
+    monkeypatch.setattr(skills, &quot;rewrite_query&quot;, lambda q, p: &quot;better query&quot;)
+    return calls
+
+
+async def test_happy_path(monkeypatch):
+    calls = fake_skills(monkeypatch)
+    result = await graph.ask(&quot;What is RRF?&quot;)
+    assert calls == [&quot;retrieve&quot;, &quot;grade&quot;, &quot;write&quot;, &quot;critic&quot;]
+    assert result[&quot;grounded&quot;] is True and result[&quot;citations&quot;][0][&quot;n&quot;] == 1
+
+
+async def test_retry_then_scout(monkeypatch):
+    calls = fake_skills(monkeypatch, relevant_after_scout=True)
+    await graph.ask(&quot;What is RRF?&quot;)
+    assert calls == [&quot;retrieve&quot;, &quot;grade&quot;, &quot;retrieve&quot;, &quot;grade&quot;, &quot;scout&quot;, &quot;retrieve&quot;, &quot;grade&quot;,
+                     &quot;write&quot;, &quot;critic&quot;]
+
+
+async def test_rewrite_when_not_grounded(monkeypatch):
+    calls = fake_skills(monkeypatch, grounded_sequence=(False, True))
+    result = await graph.ask(&quot;What is RRF?&quot;)
+    assert calls[-4:] == [&quot;write&quot;, &quot;critic&quot;, &quot;write&quot;, &quot;critic&quot;]
+    assert result[&quot;grounded&quot;] is True</pre>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
+<tr><td><span style="font-family:Roboto Mono">CHUNK = {...}</span></td><td>one fake chunk, so no OpenSearch is needed</td></tr>
+<tr><td><span style="font-family:Roboto Mono">def fake_skills(monkeypatch, relevant_after_scout=False, grounded_sequence=(True,))</span></td><td>replaces the five real agents with tiny fakes and records the order in which they are called</td></tr>
+<tr><td><span style="font-family:Roboto Mono">monkeypatch</span></td><td>a pytest helper that swaps a variable for the duration of one test and puts it back afterwards</td></tr>
+<tr><td><span style="font-family:Roboto Mono">calls.append(&quot;retrieve&quot;)</span></td><td>each fake writes its name into the calls list</td></tr>
+<tr><td><span style="font-family:Roboto Mono">grade(...)</span> returns [] until the scout ran</td><td>simulates &quot;the index has nothing until fresh papers arrive&quot;</td></tr>
+<tr><td><span style="font-family:Roboto Mono">critic(...)</span> returns <span style="font-family:Roboto Mono">grounded.pop(0)</span></td><td>each critic call takes the next verdict from the list, e.g. first False, then True</td></tr>
+<tr><td><span style="font-family:Roboto Mono">monkeypatch.setattr(graph, &quot;LOCAL_SKILLS&quot;, {...})</span></td><td>the graph now calls the fakes</td></tr>
+<tr><td><span style="font-family:Roboto Mono">monkeypatch.setattr(skills, &quot;rewrite_query&quot;, lambda q, p: &quot;better query&quot;)</span></td><td>no LLM for the rewriter either</td></tr>
+<tr><td><span style="font-family:Roboto Mono">async def test_happy_path</span></td><td>expects exactly retrieve, grade, write, critic</td></tr>
+<tr><td><span style="font-family:Roboto Mono">async def test_retry_then_scout</span></td><td>expects retrieve, grade, retrieve, grade (retry loop), scout, retrieve, grade, write, critic</td></tr>
+<tr><td><span style="font-family:Roboto Mono">async def test_rewrite_when_not_grounded</span></td><td>the Critic says False once, so the last four calls must be write, critic, write, critic</td></tr>
+<tr><td><span style="font-family:Roboto Mono">assert ...</span></td><td>the test fails with a clear message if the order is different</td></tr>
+</table>
+<p><b>Step 10.</b> Run all tests:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">pytest -q</pre>
+<p><b>You should see:</b> all tests pass, for example <span style="font-family:Roboto Mono">10 passed</span> once Part 6A&#x27;s tests exist too. Right now (only Part 4 and Part 5 files) you see <span style="font-family:Roboto Mono">3 passed</span> (more if you already created other test files).</p>
+<p><b style="color:#bf1a1a">Watch out:</b> &quot;async def test_...&quot; needs pytest-asyncio; it is installed by the dev extra in Section 2B.7, and pyproject.toml sets asyncio_mode = &quot;auto&quot;.</p>
+<p><b style="color:#1a7333">CHECKPOINT:</b> pytest prints passed and no failed.</p>
+<p><b>If not:</b> &quot;fixture &#x27;monkeypatch&#x27; not found&quot; means pytest is not the venv&#x27;s pytest: run <span style="font-family:Roboto Mono">source .venv/bin/activate</span> and repeat.</p>
+<h2>SECTION 5.8 - Create the Upstash Redis database (free)</h2>
+<p><b>WHERE:</b> web browser on your laptop</p>
+<p><b>GOAL:</b> a free managed Redis database on the internet, and its address in .env as REDIS_URL.</p>
+<p><b>Step 1.</b> Open <a href="https://console.upstash.com">https://console.upstash.com</a></p>
+<p><b>Step 2.</b> Click <b>Sign up</b> (or <b>Login</b>) and sign in with GitHub or Google.</p>
+<p><b>Step 3.</b> Click the <b>Redis</b> tab at the top.</p>
+<p><b>Step 4.</b> Click <b>+ Create Database</b>.</p>
+<p><b>Step 5.</b> Fill the form:</p>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Field</b></td><td style="background-color:#e0e0e0"><b>Value</b></td><td style="background-color:#e0e0e0"><b>Why</b></td></tr>
+<tr><td>Database Name</td><td>querymesh-cache</td><td>any name; this one is easy to recognise</td></tr>
+<tr><td>Primary Region</td><td>the region closest to your Hyperstack VM (for Hyperstack CANADA-1 choose US-East / N. Virginia)</td><td>fewer milliseconds per cache call</td></tr>
+<tr><td>Read Regions</td><td>leave empty</td><td>not needed for one user</td></tr>
+<tr><td>Plan</td><td>Free</td><td>1 database, 250 MB, 500K commands per month [28]</td></tr>
+</table>
+<p><b>Step 6.</b> Click <b>Next</b>, choose <b>Free</b>, then click <b>Create</b> (button names can differ slightly (verify)).</p>
+<p><b>You should see:</b> the database page with a <b>Details</b> section showing Endpoint, Port and Password/Token.</p>
+<p><b>Step 7.</b> Copy the <b>Endpoint</b> (looks like <span style="font-family:Roboto Mono">funny-bird-12345.upstash.io</span>).</p>
+<p><b>Step 8.</b> Copy the <b>Password</b> or <b>Token</b> (a long string; click the eye or copy icon).</p>
+<p><b>Step 9.</b> Build your URL from this pattern:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">rediss://default:UPSTASH_TOKEN@UPSTASH_ENDPOINT:6379</pre>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Placeholder</b></td><td style="background-color:#e0e0e0"><b>Replace with</b></td><td style="background-color:#e0e0e0"><b>Example</b></td></tr>
+<tr><td>UPSTASH_TOKEN</td><td>the password/token from Step 8</td><td>AbCdEf123...</td></tr>
+<tr><td>UPSTASH_ENDPOINT</td><td>the endpoint from Step 7</td><td>funny-bird-12345.upstash.io</td></tr>
+</table>
+<p><b>Step 10.</b> In VS Code, open the file <span style="font-family:Roboto Mono">.env</span>.</p>
+<p><b>Step 11.</b> Replace the line <span style="font-family:Roboto Mono">REDIS_URL=CHANGE_ME</span> with your URL, for example:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">REDIS_URL=rediss://default:AbCdEf123@funny-bird-12345.upstash.io:6379</pre>
+<p><b>Step 12.</b> Press Ctrl+S.</p>
+<p><b style="color:#bf1a1a">Watch out:</b> it is rediss with TWO s (TLS encryption). Upstash refuses plain redis:// connections.</p>
+<p><b style="color:#bf1a1a">Watch out:</b> the token is a password. Never paste it into code, a screenshot or Git. .env is in .gitignore.</p>
+<p><b style="color:#1a7333">CHECKPOINT:</b> <span style="font-family:Roboto Mono">grep ^REDIS_URL .env | cut -c1-18</span> prints <span style="font-family:Roboto Mono">REDIS_URL=rediss:/</span>.</p>
+<p><b>If not:</b> open .env and fix the line; there must be no spaces around =.</p>
+<h2>SECTION 5.9 - Create querymesh/cache.py and prove the cache works</h2>
+<p><b>WHERE:</b> VS Code Explorer, folder <span style="font-family:Roboto Mono">querymesh</span>, then the Terminal</p>
+<p><b>GOAL:</b> an exact-match answer cache: the key is the SHA-256 fingerprint of the normalised question; the value is the final answer as JSON; it expires after 24 hours.</p>
+<p><b>Step 1.</b> Right-click the folder <span style="font-family:Roboto Mono">querymesh</span>.</p>
+<p><b>Step 2.</b> Click <b>New File...</b>.</p>
+<p><b>Step 3.</b> Type <span style="font-family:Roboto Mono">cache.py</span> and press Enter.</p>
+<p><b>Step 4.</b> Paste the grey box below.</p>
+<p><b>Step 5.</b> Press Ctrl+S.</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;Exact-match answer cache in Upstash Redis. Key = SHA-256 of the normalised question.&quot;&quot;&quot;
+import hashlib
+import json
+
+import logfire
+import redis
+
+from querymesh import config
+
+_client = (redis.Redis.from_url(config.REDIS_URL, decode_responses=True, socket_timeout=5)
+           if config.REDIS_URL.startswith((&quot;redis://&quot;, &quot;rediss://&quot;)) else None)  # no URL = no cache
+
+
+def cache_key(question: str) -&gt; str:
+    normalised = &quot; &quot;.join(question.lower().split())  # &quot;What is RAG? &quot; == &quot;what  is rag?&quot;
+    digest = hashlib.sha256(f&quot;{config.LLM_MODEL}|{normalised}&quot;.encode(&quot;utf-8&quot;)).hexdigest()
+    return f&quot;querymesh:answer:{digest}&quot;
+
+
+def get(question: str) -&gt; dict | None:
+    if _client is None:
+        return None
+    try:
+        raw = _client.get(cache_key(question))
+    except redis.RedisError as error:  # the cache must never break the app
+        logfire.warn(&quot;cache read failed: {error}&quot;, error=str(error))
+        return None
+    return json.loads(raw) if raw else None
+
+
+def put(question: str, result: dict) -&gt; None:
+    if _client is None:
+        return
+    try:
+        _client.set(cache_key(question), json.dumps(result), ex=config.CACHE_TTL_SECONDS)
+    except redis.RedisError as error:
+        logfire.warn(&quot;cache write failed: {error}&quot;, error=str(error))</pre>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
+<tr><td><span style="font-family:Roboto Mono">import hashlib</span></td><td>Python&#x27;s built-in fingerprint functions, including SHA-256</td></tr>
+<tr><td><span style="font-family:Roboto Mono">import redis</span></td><td>the standard Redis client; it works with Upstash because Upstash speaks the normal Redis protocol over TLS</td></tr>
+<tr><td><span style="font-family:Roboto Mono">_client = (redis.Redis.from_url(...) if config.REDIS_URL.startswith((&quot;redis://&quot;, &quot;rediss://&quot;)) else None)</span></td><td>connect only if REDIS_URL looks like a Redis address; if it is empty or still CHANGE_ME, the cache is simply off</td></tr>
+<tr><td><span style="font-family:Roboto Mono">decode_responses=True</span></td><td>Redis returns Python text instead of raw bytes</td></tr>
+<tr><td><span style="font-family:Roboto Mono">socket_timeout=5</span></td><td>never wait more than 5 seconds for the cache</td></tr>
+<tr><td><span style="font-family:Roboto Mono">def cache_key(question)</span></td><td>builds the key for one question</td></tr>
+<tr><td><span style="font-family:Roboto Mono">&quot; &quot;.join(question.lower().split())</span></td><td>normalising: lower case and single spaces, so &quot;What is  RAG? &quot; and &quot;what is rag?&quot; give the same key</td></tr>
+<tr><td><span style="font-family:Roboto Mono">hashlib.sha256(f&quot;{config.LLM_MODEL}|{normalised}&quot;.encode(&quot;utf-8&quot;)).hexdigest()</span></td><td>the 64-character fingerprint. The model name is included, so a new model never serves answers made by the old one</td></tr>
+<tr><td><span style="font-family:Roboto Mono">return f&quot;querymesh:answer:{digest}&quot;</span></td><td>a readable prefix: you can list all QueryMesh keys with the pattern querymesh:answer:*</td></tr>
+<tr><td><span style="font-family:Roboto Mono">def get(question)</span></td><td>returns the stored answer as a dictionary, or None when there is none</td></tr>
+<tr><td><span style="font-family:Roboto Mono">except redis.RedisError</span></td><td>if Upstash is unreachable we log a warning and continue without the cache: the cache must never break the app</td></tr>
+<tr><td><span style="font-family:Roboto Mono">json.loads(raw) if raw else None</span></td><td>the stored text is JSON; turn it back into a dictionary</td></tr>
+<tr><td><span style="font-family:Roboto Mono">def put(question, result)</span></td><td>stores the answer as JSON text</td></tr>
+<tr><td><span style="font-family:Roboto Mono">ex=config.CACHE_TTL_SECONDS</span></td><td>expire after 86,400 seconds = 24 hours, so new papers are not hidden by old answers forever</td></tr>
+</table>
+<p><b>Step 6.</b> Store a test value and read it back:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">python -c &quot;from querymesh import cache; cache.put(&#x27;What is RAG?&#x27;, {&#x27;answer&#x27;: &#x27;test&#x27;}); print(cache.get(&#x27;  what is   rag? &#x27;))&quot;</pre>
+<p><b>You should see:</b> {&#x27;answer&#x27;: &#x27;test&#x27;}  (a differently written question found the same entry: that is the normalisation)</p>
+<p><b>Step 7.</b> Print the key to see the SHA-256 fingerprint:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">python -c &quot;from querymesh import cache; print(cache.cache_key(&#x27;What is RAG?&#x27;))&quot;</pre>
+<p><b>You should see:</b> querymesh:answer: followed by 64 letters and digits.</p>
+<p><b>Step 8.</b> Open the Upstash console in your browser, click your database, then the <b>Data Browser</b> tab.</p>
+<p><b>You should see:</b> one key starting with querymesh:answer: and a TTL of about 86400 seconds.</p>
+<p><b>Step 9.</b> Delete the test entry so it cannot confuse later tests:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">python -c &quot;from querymesh import cache; cache._client.delete(cache.cache_key(&#x27;What is RAG?&#x27;)); print(cache.get(&#x27;What is RAG?&#x27;))&quot;</pre>
+<p><b>You should see:</b> None</p>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>If you see...</b></td><td style="background-color:#e0e0e0"><b>It means...</b></td><td style="background-color:#e0e0e0"><b>Do this next</b></td></tr>
+<tr><td>None in Step 6</td><td>the cache is off (REDIS_URL not loaded)</td><td>check Section 5.8 Step 11 and that you saved .env</td></tr>
+<tr><td>Error ... SSL / Connection reset</td><td>redis:// was used instead of rediss://</td><td>fix the URL (two s)</td></tr>
+<tr><td>WRONGPASS / invalid password</td><td>wrong token</td><td>copy the token again from the Details tab</td></tr>
+<tr><td>a warning &quot;cache read failed&quot;</td><td>Upstash unreachable; the app continues without cache</td><td>check the VM&#x27;s internet: <span style="font-family:Roboto Mono">curl -sI <a href="https://upstash.com">https://upstash.com</a> | head -1</span></td></tr>
+</table>
+<p>Who uses the cache: the API in Part 6A calls cache.get before running the agents and cache.put after. You will see &quot;cached&quot;: true on the second identical question there.</p>
+<p><b style="color:#1a7333">CHECKPOINT:</b> Step 6 prints {&#x27;answer&#x27;: &#x27;test&#x27;} and Step 9 prints None.</p>
+<p><b>If not:</b> use the table above.</p>
+<h2>SECTION 5.10 - Common mistake at this level</h2>
+<p><b>Mistake:</b> trusting the answer because it sounds confident. A small model writes fluent text even when the passages do not support it.</p>
+<p><b>How to spot it:</b> open the cited paper for one claim and search the page (Ctrl+F) for the key word. If the claim is not there, the Critic missed it. Also look at the steps: &quot;grader: 0 of 8 relevant&quot; followed directly by a writer step (after the scout) means the answer was written from weak evidence.</p>
+<p><b>Fix:</b> keep the Critic step; raise MIN_RELEVANT to 3 in .env for stricter answers; load more papers on the topic (Section 4.5) so the Grader has real evidence to keep.</p>
+<p><b>Second mistake:</b> caching a wrong answer for 24 hours. While you are still tuning prompts, set CACHE_TTL_SECONDS=300 (5 minutes) in .env, or delete keys as in Section 5.9 Step 9.</p>
+<h2>PART 5 RESULT CHECK (all must be true before Part 6A)</h2>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Check</b></td><td style="background-color:#e0e0e0"><b>Command</b></td><td style="background-color:#e0e0e0"><b>Expected</b></td></tr>
+<tr><td>model reachable</td><td><span style="font-family:Roboto Mono">python -m querymesh.llm</span></td><td>one sentence about arXiv</td></tr>
+<tr><td>graph builds</td><td><span style="font-family:Roboto Mono">python -c &quot;from querymesh.graph import graph; print(type(graph).__name__)&quot;</span></td><td>CompiledStateGraph</td></tr>
+<tr><td>full team</td><td><span style="font-family:Roboto Mono">python -m querymesh.graph &quot;How does hybrid search work?&quot;</span></td><td>retriever, grader, writer, critic lines, then a cited answer</td></tr>
+<tr><td>retry loop seen</td><td>Section 5.6</td><td>a &quot;supervisor: search again&quot; line and a &quot;scout:&quot; line</td></tr>
+<tr><td>routing tests</td><td><span style="font-family:Roboto Mono">pytest -q tests/test_graph.py</span></td><td>3 passed</td></tr>
+<tr><td>cache</td><td>Section 5.9 Step 6</td><td>{&#x27;answer&#x27;: &#x27;test&#x27;}</td></tr>
+</table>
+</body></html>

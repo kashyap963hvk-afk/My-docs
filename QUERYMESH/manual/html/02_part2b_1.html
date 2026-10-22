@@ -1,0 +1,760 @@
+<html><head><meta charset="utf-8"></head><body style="font-family:Arial">
+<h1>PART 2B - Project folder + tools on the GPU computer (from an empty disk)</h1>
+<h2>BEFORE YOU START: what you are building in this part</h2>
+<p>You now have an empty GPU computer. In this part you create the QueryMesh folder structure by hand, learn the ONE procedure you will use to create every file in this manual, install the tools (tmux, uv, Python 3.12, the AWS CLI, FakeCloud), create the Python environment, store your secrets in a .env file, and start the two big services that everything else needs: vLLM (the language model) and OpenSearch (the search engine).</p>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Thing</b></td><td style="background-color:#e0e0e0"><b>What it is</b></td><td style="background-color:#e0e0e0"><b>Why QueryMesh needs it</b></td></tr>
+<tr><td>uv</td><td>a very fast Python package manager [42]</td><td>creates the .venv environment and installs every library in minutes</td></tr>
+<tr><td>.venv</td><td>a private folder of Python packages for this project</td><td>the exact versions in pyproject.toml, without touching the system Python</td></tr>
+<tr><td>.env</td><td>a text file with your secrets and settings</td><td>keys never go into code or Git; every program reads them from here</td></tr>
+<tr><td>tmux</td><td>a terminal that keeps running when you disconnect</td><td>Airflow and the five agents run for hours</td></tr>
+<tr><td>vLLM container</td><td>the model server on port 8000</td><td>the Grader, Writer and Critic agents need an LLM</td></tr>
+<tr><td>OpenSearch container</td><td>the search engine on port 9200</td><td>stores the paper chunks and runs hybrid search</td></tr>
+<tr><td>FakeCloud</td><td>a free AWS copy on port 4566</td><td>practise every AWS command before paying for real AWS</td></tr>
+<tr><td>Git + GitHub</td><td>version control and code hosting</td><td>your portfolio; GitHub Actions deploys from it in Part 6B</td></tr>
+</table>
+<p>Result at the end of this part: this folder tree exists, the .venv works, vLLM answers on port 8000, OpenSearch answers on port 9200, FakeCloud answers on port 4566, and your code is on GitHub.</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">/home/ubuntu/querymesh/
+├── querymesh/            the Python package: agents, graph, search, API, UIs
+├── dags/                 the Airflow schedule (Part 4)
+├── tests/                automatic tests (Parts 5-6A)
+├── scripts/              start scripts and the FakeCloud/AWS switch
+├── deploy/helm/querymesh/templates/   the Kubernetes Helm chart (Part 6B)
+├── deploy/k8s/           kind and OpenSearch settings (Part 6B)
+├── deploy/aws/           EKS and IAM files (Part 6B)
+├── .github/workflows/    the CI/CD pipeline (Part 6B)
+└── data/                 downloaded PDFs (created by the scripts)</pre>
+<h2>SECTION 2B.1 - Create the project folders</h2>
+<p><b>WHERE:</b> VS Code Terminal (bottom-left shows SSH: querymesh)</p>
+<p><b>GOAL:</b> the empty folder tree above.</p>
+<p><b>Step 1.</b> Go to your home folder:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">cd ~</pre>
+<p><b>Step 2.</b> Create the project folder and all sub-folders in one command:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">mkdir -p querymesh/querymesh querymesh/dags querymesh/tests querymesh/scripts querymesh/deploy/helm/querymesh/templates querymesh/deploy/k8s querymesh/deploy/aws querymesh/.github/workflows querymesh/data</pre>
+<p><b>Step 3.</b> Go into the project folder:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">cd ~/querymesh</pre>
+<p><b>Step 4.</b> List what you created (including hidden folders that start with a dot):</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">ls -a</pre>
+<p><b>You should see:</b> .  ..  .github  dags  data  deploy  querymesh  scripts  tests</p>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Piece</b></td><td style="background-color:#e0e0e0"><b>What it does</b></td></tr>
+<tr><td>cd ~</td><td>go to your home folder /home/ubuntu (~ is a shortcut for it)</td></tr>
+<tr><td>mkdir -p</td><td>make folders; -p also creates parent folders and does not complain if they exist</td></tr>
+<tr><td>ls -a</td><td>list everything, also names that start with a dot (hidden in Linux)</td></tr>
+</table>
+<p>Tip: every file in this manual is also in the GitHub repository kashyap963hvk-afk/My-docs, folder QUERYMESH. If you prefer to copy instead of creating files by hand, you can download that folder with WinSCP or git and put its contents into ~/querymesh. Creating the files yourself, one by one, is how you learn them; this manual assumes you do that.</p>
+<p><b style="color:#1a7333">CHECKPOINT:</b> ls -a shows the seven folders.</p>
+<h2>SECTION 2B.2 - Open the project folder in VS Code</h2>
+<p><b>WHERE:</b> VS Code (connected, SSH: querymesh)</p>
+<p><b>GOAL:</b> the Explorer panel on the left shows your project.</p>
+<p><b>Step 1.</b> In the top menu click File &gt; Open Folder...</p>
+<p><b>Step 2.</b> In the box type /home/ubuntu/querymesh/ and press Enter (or click OK).</p>
+<p><b>Step 3.</b> If asked &quot;Do you trust the authors of the files in this folder?&quot;, click Yes, I trust the authors.</p>
+<p><b>Step 4.</b> Press Ctrl+Shift+E to show the Explorer panel.</p>
+<p><b>Step 5.</b> Open a terminal again: Terminal &gt; New Terminal.</p>
+<p><b>You should see:</b> the Explorer shows QUERYMESH with the folders, and the new terminal starts in ~/querymesh.</p>
+<p><b style="color:#1a7333">CHECKPOINT:</b> pwd in the terminal prints /home/ubuntu/querymesh</p>
+<h2>SECTION 2B.3 - THE procedure to create any file (practise it once)</h2>
+<p><b>WHERE:</b> VS Code Explorer panel (left)</p>
+<p><b>GOAL:</b> you can create a file in the right folder with the exact content. Every file in this manual is made this way.</p>
+<p><b>Step 1.</b> In the Explorer, right-click the folder where the file must go (for this practice: the top folder QUERYMESH).</p>
+<p><b>Step 2.</b> Click New File...</p>
+<p><b>Step 3.</b> Type the file name (for this practice: README.md) and press Enter. The empty file opens in the editor.</p>
+<p><b>Step 4.</b> Copy the content from the grey box in this manual (select it, Ctrl+C).</p>
+<p><b>Step 5.</b> Click inside the empty editor and press Ctrl+V.</p>
+<p><b>Step 6.</b> Press Ctrl+S to save (the dot on the file&#x27;s tab disappears).</p>
+<p>Practice content for README.md:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2"># QueryMesh
+A production-grade arXiv research assistant: five LangGraph agents (retriever, grader,
+writer, critic, scout) behind FastMCP + A2A, hybrid search in OpenSearch, deployed on AWS EKS.</pre>
+<p><b>Step 7.</b> Check the file from the terminal:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">cat README.md</pre>
+<p><b>You should see:</b> the three lines you pasted.</p>
+<p><b style="color:#bf1a1a">Watch out:</b> (1) the file name must match EXACTLY, including the extension (.py, .sh, .yaml, .toml); (2) right-click the CORRECT folder, otherwise the file lands in the wrong place; to create a file inside querymesh/querymesh, right-click the INNER querymesh folder; (3) Google Docs can turn straight quotes into curly quotes if you edit the document: always copy from the grey box, and if Python reports &quot;invalid character&quot;, re-paste the file.</p>
+<p><b style="color:#bf1a1a">Watch out:</b> Python cares about spaces at the start of a line. Paste the whole grey box in one go; do not retype it.</p>
+<p><b style="color:#1a7333">CHECKPOINT:</b> cat README.md prints the text.</p>
+<h2>SECTION 2B.4 - Install system tools and learn tmux (jobs that survive disconnects)</h2>
+<p><b>WHERE:</b> VS Code Terminal, folder ~/querymesh</p>
+<p><b>GOAL:</b> tmux, git, jq and unzip installed; you can start, leave and re-enter a tmux session.</p>
+<p><b>Step 1.</b> Install the tools:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">sudo apt-get update &amp;&amp; sudo apt-get install -y tmux git unzip jq</pre>
+<p><b>You should see:</b> the last lines say &quot;Setting up tmux ...&quot; or &quot;tmux is already the newest version&quot;.</p>
+<p><b>Step 2.</b> Start a practice tmux session:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">tmux new -s practice</pre>
+<p><b>Step 3.</b> In the tmux session type a long-running command:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">for i in $(seq 1 300); do echo &quot;tick $i&quot;; sleep 1; done</pre>
+<p><b>Step 4.</b> Detach (leave it running): press Ctrl+B, release both keys, then press D.</p>
+<p><b>You should see:</b> &quot;[detached (from session practice)]&quot; and your normal prompt.</p>
+<p><b>Step 5.</b> List sessions:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">tmux ls</pre>
+<p><b>You should see:</b> practice: 1 windows ...</p>
+<p><b>Step 6.</b> Re-attach:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">tmux attach -t practice</pre>
+<p><b>You should see:</b> the ticks still counting.</p>
+<p><b>Step 7.</b> Stop the loop with Ctrl+C.</p>
+<p><b>Step 8.</b> Type exit and press Enter to close the session.</p>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Key or command</b></td><td style="background-color:#e0e0e0"><b>Meaning</b></td></tr>
+<tr><td>tmux new -s NAME</td><td>start a new session called NAME</td></tr>
+<tr><td>Ctrl+B then D</td><td>detach: leave the session running in the background</td></tr>
+<tr><td>tmux ls</td><td>list running sessions</td></tr>
+<tr><td>tmux attach -t NAME</td><td>go back into a session</td></tr>
+<tr><td>exit (inside tmux)</td><td>close the session</td></tr>
+<tr><td>jq</td><td>a tool that pretty-prints and filters JSON answers from APIs</td></tr>
+</table>
+<p>Why it matters: Airflow and the five agents run for hours. If your laptop sleeps or Wi-Fi drops, a normal terminal kills them; a tmux session keeps them running on the GPU computer.</p>
+<p><b style="color:#1a7333">CHECKPOINT:</b> you detached and re-attached once.</p>
+<h2>SECTION 2B.5 - Install uv (Python package manager)</h2>
+<p><b>WHERE:</b> VS Code Terminal, folder ~/querymesh</p>
+<p><b>GOAL:</b> the uv command works.</p>
+<p><b>Step 1.</b> Install:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">curl -LsSf https://astral.sh/uv/install.sh | sh</pre>
+<p><b>Step 2.</b> Load it into this terminal:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">source ~/.bashrc</pre>
+<p><b>Step 3.</b> Check:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">uv --version</pre>
+<p><b>You should see:</b> uv 0.x.x (any recent version, for example uv 0.11.32)</p>
+<p>Why uv: it creates environments and installs packages 10-100x faster than pip, and it downloads Python 3.12 by itself if the computer does not have it [42].</p>
+<p><b style="color:#1a7333">CHECKPOINT:</b> uv --version prints a version.</p>
+<p><b>If not:</b> &quot;uv: command not found&quot; = close the terminal (trash-can icon), open Terminal &gt; New Terminal, try again.</p>
+<h2>SECTION 2B.6 - Create pyproject.toml and the package folder</h2>
+<p><b>WHERE:</b> VS Code Explorer</p>
+<p><b>GOAL:</b> the file that lists every library QueryMesh uses (with exact versions), and the empty Python package.</p>
+<p>FILE 1: pyproject.toml in the top folder QUERYMESH.</p>
+<p><b>Step 1.</b> Right-click the top folder QUERYMESH.</p>
+<p><b>Step 2.</b> Click New File...</p>
+<p><b>Step 3.</b> Type pyproject.toml and press Enter.</p>
+<p><b>Step 4.</b> Paste the grey box below.</p>
+<p><b>Step 5.</b> Press Ctrl+S.</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">[project]
+name = &quot;querymesh&quot;
+version = &quot;1.0.0&quot;
+description = &quot;QueryMesh: a multi-agent arXiv research assistant&quot;
+requires-python = &quot;&gt;=3.12,&lt;3.13&quot;
+dependencies = [
+    &quot;langgraph==1.2.16&quot;,
+    &quot;langchain-openai==1.7.2&quot;,
+    &quot;fastmcp==4.1.3&quot;,
+    &quot;a2a-sdk[http-server]==1.2.3&quot;,
+    &quot;opensearch-py==3.2.0&quot;,
+    &quot;httpx==0.28.1&quot;,
+    &quot;redis==8.1.0&quot;,
+    &quot;fastapi==0.157.0&quot;,
+    &quot;uvicorn==0.54.0&quot;,
+    &quot;python-multipart==0.0.32&quot;,
+    &quot;pyjwt==2.15.1&quot;,
+    &quot;python-dotenv==1.2.4&quot;,
+    &quot;logfire[fastapi,httpx]==5.2.0&quot;,
+    &quot;langfuse==5.0.4&quot;,
+    &quot;arxiv==4.0.1&quot;,
+    &quot;boto3==1.43.116&quot;,
+    &quot;gradio==6.30.0&quot;,
+    &quot;python-telegram-bot==22.8&quot;,
+]
+
+[project.optional-dependencies]
+ingest = [&quot;docling==2.141.0&quot;]
+dev = [&quot;pytest==9.1.1&quot;, &quot;pytest-asyncio==1.4.0&quot;]
+
+[build-system]
+requires = [&quot;setuptools&gt;=75&quot;]
+build-backend = &quot;setuptools.build_meta&quot;
+
+[tool.setuptools.packages.find]
+include = [&quot;querymesh*&quot;]
+
+[tool.pytest.ini_options]
+asyncio_mode = &quot;auto&quot;
+
+[tool.logfire]
+ignore_no_config = true</pre>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
+<tr><td>[project]</td><td>the start of the project description</td></tr>
+<tr><td>name = &quot;querymesh&quot;</td><td>the package name; you will import it as querymesh in Python</td></tr>
+<tr><td>version = &quot;1.0.0&quot;</td><td>your version number</td></tr>
+<tr><td>description = ...</td><td>one sentence about the project</td></tr>
+<tr><td>requires-python = &quot;&gt;=3.12,&lt;3.13&quot;</td><td>only Python 3.12 is allowed (every library below was tested together on 3.12)</td></tr>
+<tr><td>dependencies = [ ... ]</td><td>the libraries installed for everyone; == means &quot;exactly this version&quot;, so your setup matches the manual</td></tr>
+<tr><td>langgraph==1.2.16</td><td>builds the supervisor-worker state machine (Part 5)</td></tr>
+<tr><td>langchain-openai==1.7.2</td><td>the chat client that talks to vLLM&#x27;s OpenAI-compatible API</td></tr>
+<tr><td>fastmcp==4.1.3</td><td>turns agent functions into MCP tools served over SSE (Part 6A)</td></tr>
+<tr><td>a2a-sdk[http-server]==1.2.3</td><td>the Agent2Agent protocol (spec 1.0): Agent Cards, delegation; [http-server] adds the web-server parts</td></tr>
+<tr><td>opensearch-py==3.2.0</td><td>the Python client for OpenSearch</td></tr>
+<tr><td>httpx==0.28.1</td><td>sends HTTP requests (Jina API, PDF downloads, the API client)</td></tr>
+<tr><td>redis==8.1.0</td><td>talks to Upstash Redis (the cache)</td></tr>
+<tr><td>fastapi==0.157.0, uvicorn==0.54.0</td><td>the web API framework and the server that runs it</td></tr>
+<tr><td>python-multipart==0.0.32</td><td>lets FastAPI read the login form (username + password) at POST /token</td></tr>
+<tr><td>pyjwt==2.15.1</td><td>creates and checks JWT login tokens</td></tr>
+<tr><td>python-dotenv==1.2.4</td><td>reads the .env file</td></tr>
+<tr><td>logfire[fastapi,httpx]==5.2.0</td><td>Pydantic Logfire tracing, with the add-ons that trace FastAPI requests and httpx calls</td></tr>
+<tr><td>langfuse==5.0.4</td><td>Langfuse tracing of prompts, answers and tokens</td></tr>
+<tr><td>arxiv==4.0.1</td><td>a polite client for the arXiv API (waits 3 seconds between requests)</td></tr>
+<tr><td>boto3==1.43.116</td><td>the AWS Python library (uploads PDFs to S3 on FakeCloud or AWS)</td></tr>
+<tr><td>gradio==6.30.0</td><td>the web chat interface</td></tr>
+<tr><td>python-telegram-bot==22.8</td><td>the Telegram bot library</td></tr>
+<tr><td>[project.optional-dependencies]</td><td>extra groups you install only when needed</td></tr>
+<tr><td>ingest = [&quot;docling==2.141.0&quot;]</td><td>Docling reads PDFs; it is big (it brings PyTorch), so it is a separate group used by ingestion</td></tr>
+<tr><td>dev = [&quot;pytest==9.1.1&quot;, &quot;pytest-asyncio==1.4.0&quot;]</td><td>test tools; pytest-asyncio lets tests use async functions</td></tr>
+<tr><td>[build-system] ... setuptools</td><td>how Python turns this folder into an installable package</td></tr>
+<tr><td>[tool.setuptools.packages.find] include = [&quot;querymesh*&quot;]</td><td>only the querymesh folder is the package (not tests, scripts or data)</td></tr>
+<tr><td>[tool.pytest.ini_options] asyncio_mode = &quot;auto&quot;</td><td>async test functions run without extra decorators</td></tr>
+<tr><td>[tool.logfire] ignore_no_config = true</td><td>no warning when a test runs code that uses Logfire before it is configured</td></tr>
+</table>
+<p>FILE 2: querymesh/__init__.py (marks the folder as a Python package).</p>
+<p><b>Step 6.</b> Right-click the INNER folder querymesh (inside QUERYMESH).</p>
+<p><b>Step 7.</b> Click New File...</p>
+<p><b>Step 8.</b> Type __init__.py (two underscores before and after init) and press Enter.</p>
+<p><b>Step 9.</b> Paste the grey box below.</p>
+<p><b>Step 10.</b> Press Ctrl+S.</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;QueryMesh: a multi-agent arXiv research assistant.&quot;&quot;&quot;</pre>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Line</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
+<tr><td>&quot;&quot;&quot;QueryMesh: ...&quot;&quot;&quot;</td><td>a docstring: a one-line description. A folder with an __init__.py file can be imported in Python (import querymesh)</td></tr>
+</table>
+<p><b style="color:#1a7333">CHECKPOINT:</b> ls shows pyproject.toml and ls querymesh shows __init__.py</p>
+<h2>SECTION 2B.7 - Create the Python environment and install everything</h2>
+<p><b>WHERE:</b> VS Code Terminal, folder ~/querymesh</p>
+<p><b>GOAL:</b> .venv with all QueryMesh libraries, and it switches on by itself in every new terminal.</p>
+<p><b>Step 1.</b> Create the environment with Python 3.12:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">uv venv -p 3.12 .venv</pre>
+<p><b>You should see:</b> &quot;Using CPython 3.12.x&quot; and &quot;Creating virtual environment at: .venv&quot;</p>
+<p><b>Step 2.</b> Switch it on (activate it):</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">source .venv/bin/activate</pre>
+<p><b>You should see:</b> the prompt now starts with (querymesh) or (.venv).</p>
+<p><b>Step 3.</b> Install QueryMesh with the dev and ingest groups (5-10 minutes; Docling brings PyTorch, about 3-4 GB):</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">uv pip install -e &quot;.[dev,ingest]&quot;</pre>
+<p><b>You should see:</b> a long list ending with lines such as + langgraph==1.2.16, + fastmcp==4.1.3, + docling==2.141.0, + querymesh==1.0.0 (from file:///home/ubuntu/querymesh)</p>
+<p><b>Step 4.</b> Check the main imports work:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">python -c &quot;import langgraph, fastmcp, a2a, opensearchpy, docling, gradio, telegram; print(&#x27;all imports ok&#x27;)&quot;</pre>
+<p><b>You should see:</b> all imports ok</p>
+<p><b>Step 5.</b> Make every new terminal open the project with the environment on:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">echo &#x27;cd ~/querymesh &amp;&amp; source .venv/bin/activate&#x27; &gt;&gt; ~/.bashrc</pre>
+<p><b>Step 6.</b> Close this terminal (trash-can icon) and open Terminal &gt; New Terminal.</p>
+<p><b>You should see:</b> the new prompt starts with (querymesh) or (.venv) and pwd prints /home/ubuntu/querymesh.</p>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Piece</b></td><td style="background-color:#e0e0e0"><b>What it does</b></td></tr>
+<tr><td>uv venv -p 3.12 .venv</td><td>create a private Python 3.12 folder called .venv (uv downloads Python 3.12 if needed)</td></tr>
+<tr><td>source .venv/bin/activate</td><td>use that Python and its packages in this terminal; deactivate switches it off</td></tr>
+<tr><td>uv pip install -e</td><td>install the project in &quot;editable&quot; mode: when you edit a .py file, the change is used at once, no reinstall</td></tr>
+<tr><td>&quot;.[dev,ingest]&quot;</td><td>. = this folder (pyproject.toml); [dev,ingest] = also install the two optional groups</td></tr>
+<tr><td>&gt;&gt; ~/.bashrc</td><td>append a line to the file that runs at every terminal start</td></tr>
+</table>
+<p><b style="color:#bf1a1a">Watch out:</b> if a later command says &quot;ModuleNotFoundError: No module named &#x27;querymesh&#x27;&quot;, the environment is not active. Look at the prompt; run source ~/querymesh/.venv/bin/activate.</p>
+<p><b style="color:#1a7333">CHECKPOINT:</b> Step 4 printed all imports ok.</p>
+<p><b>If not:</b> &quot;No solution found when resolving dependencies&quot; = run uv self update, then repeat Step 3. A network timeout = repeat Step 3 (uv continues where it stopped).</p>
+<h2>SECTION 2B.8 - Create .env (your secrets) and config.py (the settings reader)</h2>
+<p><b>WHERE:</b> VS Code Explorer and Terminal, folder ~/querymesh</p>
+<p><b>GOAL:</b> one .env file holds every key and address; config.py reads it for all programs.</p>
+<p>FILE 1: .env.example (the template; safe to commit because it has no real secrets).</p>
+<p><b>Step 1.</b> Right-click the top folder QUERYMESH.</p>
+<p><b>Step 2.</b> Click New File...</p>
+<p><b>Step 3.</b> Type .env.example and press Enter.</p>
+<p><b>Step 4.</b> Paste the grey box below.</p>
+<p><b>Step 5.</b> Press Ctrl+S.</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2"># Copy this file to .env and fill in the values marked CHANGE_ME.
+# Search
+OPENSEARCH_URL=http://localhost:9200
+INDEX_NAME=arxiv-chunks
+SEARCH_PIPELINE=querymesh-rrf
+
+# Jina AI embeddings (https://jina.ai/embeddings -&gt; API key)
+JINA_API_KEY=CHANGE_ME
+EMBED_MODEL=jina-embeddings-v5-text-small
+EMBED_DIM=1024
+
+# vLLM on this Hyperstack VM
+LLM_BASE_URL=http://localhost:8000/v1
+LLM_API_KEY=CHANGE_ME
+LLM_MODEL=qwen3-4b
+
+# Upstash Redis (rediss://default:TOKEN@ENDPOINT:6379)
+REDIS_URL=CHANGE_ME
+CACHE_TTL_SECONDS=86400
+
+# S3 bucket for PDFs. FakeCloud: keep the 4 AWS_ lines. Real AWS: delete the 4 AWS_ lines
+# and put your real bucket name (querymesh-papers-ACCOUNT_ID) in PAPERS_BUCKET.
+PAPERS_BUCKET=querymesh-papers
+AWS_ENDPOINT_URL=http://localhost:4566
+AWS_ACCESS_KEY_ID=test
+AWS_SECRET_ACCESS_KEY=test
+AWS_DEFAULT_REGION=us-east-1
+
+# Agents
+AGENT_URLS=http://localhost:8101,http://localhost:8102,http://localhost:8103,http://localhost:8104,http://localhost:8105
+WORKER_MODE=local
+
+# API security
+JWT_SECRET=CHANGE_ME
+API_USERNAME=admin
+API_PASSWORD=CHANGE_ME
+API_URL=http://localhost:8090
+
+# Observability (empty = off)
+LOGFIRE_TOKEN=
+LANGFUSE_PUBLIC_KEY=
+LANGFUSE_SECRET_KEY=
+LANGFUSE_BASE_URL=https://cloud.langfuse.com
+
+# Telegram (@BotFather)
+TELEGRAM_BOT_TOKEN=</pre>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
+<tr><td># ...</td><td>comment lines, ignored</td></tr>
+<tr><td>OPENSEARCH_URL=<a href="http://localhost:9200">http://localhost:9200</a></td><td>where the search engine listens (Section 2B.11)</td></tr>
+<tr><td>INDEX_NAME=arxiv-chunks</td><td>the OpenSearch &quot;table&quot; that holds the paper chunks</td></tr>
+<tr><td>SEARCH_PIPELINE=querymesh-rrf</td><td>the name of the RRF pipeline that merges keyword and vector results (Part 4)</td></tr>
+<tr><td>JINA_API_KEY=CHANGE_ME</td><td>your Jina AI key from Section 1.3 (turns text into vectors)</td></tr>
+<tr><td>EMBED_MODEL=jina-embeddings-v5-text-small</td><td>the Jina model; if Jina rejects it, use jina-embeddings-v3 (also 1024 numbers) [18]</td></tr>
+<tr><td>EMBED_DIM=1024</td><td>how many numbers each vector has; must match the OpenSearch index</td></tr>
+<tr><td>LLM_BASE_URL=<a href="http://localhost:8000/v1">http://localhost:8000/v1</a></td><td>where vLLM listens (Section 2B.10)</td></tr>
+<tr><td>LLM_API_KEY=CHANGE_ME</td><td>a password you invent; vLLM refuses calls without it</td></tr>
+<tr><td>LLM_MODEL=qwen3-4b</td><td>the short model name vLLM uses for Qwen3-4B-Instruct-2507</td></tr>
+<tr><td>REDIS_URL=CHANGE_ME</td><td>the Upstash address; you fill it in Section 5.8. Until then the cache is simply off</td></tr>
+<tr><td>CACHE_TTL_SECONDS=86400</td><td>keep a cached answer for 24 hours</td></tr>
+<tr><td>PAPERS_BUCKET=querymesh-papers</td><td>the S3 bucket for the original PDFs (Section 4.4)</td></tr>
+<tr><td>AWS_ENDPOINT_URL, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION</td><td>make the Python ingestion upload to FakeCloud (port 4566) with the fake keys test/test; for real AWS you delete these 4 lines (Section 4.4)</td></tr>
+<tr><td>AGENT_URLS=...</td><td>the addresses of the five agents (Part 6A)</td></tr>
+<tr><td>WORKER_MODE=local</td><td>local = agents run inside one Python process (Part 5); remote = over MCP (Part 6A)</td></tr>
+<tr><td>JWT_SECRET=CHANGE_ME</td><td>the secret that signs login tokens; anyone who knows it can forge logins</td></tr>
+<tr><td>API_USERNAME=admin, API_PASSWORD=CHANGE_ME</td><td>the login for the QueryMesh API</td></tr>
+<tr><td>API_URL=<a href="http://localhost:8090">http://localhost:8090</a></td><td>where Gradio and Telegram find the API</td></tr>
+<tr><td>LOGFIRE_TOKEN, LANGFUSE_...</td><td>tracing keys; empty = tracing off (Sections 6A.5, 6A.6)</td></tr>
+<tr><td>TELEGRAM_BOT_TOKEN</td><td>the bot token from @BotFather (Section 6A.10)</td></tr>
+</table>
+<p>FILE 2: .env (your real copy).</p>
+<p><b>Step 6.</b> In the terminal copy the template:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">cp .env.example .env</pre>
+<p><b>Step 7.</b> Generate a random LLM_API_KEY:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">python3 -c &quot;import secrets; print(secrets.token_urlsafe(32))&quot;</pre>
+<p><b>You should see:</b> one line of about 43 random characters. Copy it.</p>
+<p><b>Step 8.</b> In the Explorer click the file .env (it opens in the editor).</p>
+<p><b>Step 9.</b> In the line LLM_API_KEY=CHANGE_ME, replace CHANGE_ME with the value from Step 7.</p>
+<p><b>Step 10.</b> Generate a random JWT_SECRET (longer):</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">python3 -c &quot;import secrets; print(secrets.token_urlsafe(48))&quot;</pre>
+<p><b>Step 11.</b> In .env replace CHANGE_ME in JWT_SECRET=CHANGE_ME with that value.</p>
+<p><b>Step 12.</b> Generate a random API password:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">python3 -c &quot;import secrets; print(secrets.token_urlsafe(12))&quot;</pre>
+<p><b>Step 13.</b> In .env replace CHANGE_ME in API_PASSWORD=CHANGE_ME with that value.</p>
+<p><b>Step 14.</b> In .env replace CHANGE_ME in JINA_API_KEY=CHANGE_ME with your jina_... key from secrets.txt.</p>
+<p><b>Step 15.</b> Press Ctrl+S.</p>
+<p><b>Step 16.</b> Copy the API password into secrets.txt on your laptop (you type it when you log in later).</p>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Placeholder in .env</b></td><td style="background-color:#e0e0e0"><b>Replace with</b></td><td style="background-color:#e0e0e0"><b>Example</b></td></tr>
+<tr><td>LLM_API_KEY</td><td>output of Step 7</td><td>Xq3...J8w (43 characters)</td></tr>
+<tr><td>JWT_SECRET</td><td>output of Step 10</td><td>64 random characters</td></tr>
+<tr><td>API_PASSWORD</td><td>output of Step 12</td><td>kV2mP9xQ_b1z</td></tr>
+<tr><td>JINA_API_KEY</td><td>your key from jina.ai</td><td>jina_2f8c...</td></tr>
+<tr><td>REDIS_URL</td><td>leave CHANGE_ME for now</td><td>filled in Section 5.8</td></tr>
+</table>
+<p><b style="color:#bf1a1a">Watch out:</b> no spaces around = and no quotes in .env lines. Write JINA_API_KEY=jina_abc, not JINA_API_KEY = &quot;jina_abc&quot;.</p>
+<p>FILE 3: querymesh/config.py (reads .env for every program).</p>
+<p><b>Step 17.</b> Right-click the INNER folder querymesh.</p>
+<p><b>Step 18.</b> Click New File...</p>
+<p><b>Step 19.</b> Type config.py and press Enter.</p>
+<p><b>Step 20.</b> Paste the grey box below.</p>
+<p><b>Step 21.</b> Press Ctrl+S.</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;Every setting QueryMesh needs, read from environment variables (the .env file).&quot;&quot;&quot;
+import os
+
+from dotenv import load_dotenv
+
+load_dotenv()  # copies the lines of .env into os.environ (real env vars win)
+
+
+def env(name: str, default: str = &quot;&quot;) -&gt; str:
+    return os.getenv(name, default)
+
+
+# Search engine (OpenSearch)
+OPENSEARCH_URL = env(&quot;OPENSEARCH_URL&quot;, &quot;http://localhost:9200&quot;)
+INDEX_NAME = env(&quot;INDEX_NAME&quot;, &quot;arxiv-chunks&quot;)
+SEARCH_PIPELINE = env(&quot;SEARCH_PIPELINE&quot;, &quot;querymesh-rrf&quot;)
+
+# Embeddings (Jina AI)
+JINA_API_KEY = env(&quot;JINA_API_KEY&quot;)
+EMBED_MODEL = env(&quot;EMBED_MODEL&quot;, &quot;jina-embeddings-v5-text-small&quot;)
+EMBED_DIM = int(env(&quot;EMBED_DIM&quot;, &quot;1024&quot;))
+
+# Language model (vLLM on Hyperstack, OpenAI-compatible)
+LLM_BASE_URL = env(&quot;LLM_BASE_URL&quot;, &quot;http://localhost:8000/v1&quot;)
+LLM_API_KEY = env(&quot;LLM_API_KEY&quot;, &quot;EMPTY&quot;)
+LLM_MODEL = env(&quot;LLM_MODEL&quot;, &quot;qwen3-4b&quot;)
+
+# Cache (Upstash Redis)
+REDIS_URL = env(&quot;REDIS_URL&quot;)
+CACHE_TTL_SECONDS = int(env(&quot;CACHE_TTL_SECONDS&quot;, &quot;86400&quot;))
+
+# Paper storage (S3 on FakeCloud or AWS). Empty = do not upload.
+PAPERS_BUCKET = env(&quot;PAPERS_BUCKET&quot;)
+
+# Agents: base URLs of the five agent servers, comma separated
+AGENT_URLS = [u.strip() for u in env(&quot;AGENT_URLS&quot;).split(&quot;,&quot;) if u.strip()]
+WORKER_MODE = env(&quot;WORKER_MODE&quot;, &quot;local&quot;)  # local = in-process, remote = MCP over SSE
+
+# API security (JWT)
+JWT_SECRET = env(&quot;JWT_SECRET&quot;, &quot;change-me-please-use-a-long-random-string&quot;)
+JWT_MINUTES = int(env(&quot;JWT_MINUTES&quot;, &quot;60&quot;))
+API_USERNAME = env(&quot;API_USERNAME&quot;, &quot;admin&quot;)
+API_PASSWORD = env(&quot;API_PASSWORD&quot;, &quot;admin&quot;)
+API_URL = env(&quot;API_URL&quot;, &quot;http://localhost:8090&quot;)
+
+# Telegram
+TELEGRAM_BOT_TOKEN = env(&quot;TELEGRAM_BOT_TOKEN&quot;)
+
+# Agentic RAG limits
+MIN_RELEVANT = int(env(&quot;MIN_RELEVANT&quot;, &quot;2&quot;))
+MAX_RETRIEVALS = int(env(&quot;MAX_RETRIEVALS&quot;, &quot;2&quot;))
+MAX_GENERATIONS = int(env(&quot;MAX_GENERATIONS&quot;, &quot;2&quot;))
+TOP_K = int(env(&quot;TOP_K&quot;, &quot;8&quot;))</pre>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
+<tr><td>import os</td><td>the standard library module that reads environment variables</td></tr>
+<tr><td>from dotenv import load_dotenv</td><td>the helper that reads a .env file</td></tr>
+<tr><td>load_dotenv()</td><td>reads .env (in the folder where you start the program) and puts each line into the environment; a value that is already set in the terminal wins</td></tr>
+<tr><td>def env(name, default=&quot;&quot;)</td><td>a tiny helper: give me the setting called name, or default if it is missing</td></tr>
+<tr><td>OPENSEARCH_URL = env(...), INDEX_NAME, SEARCH_PIPELINE</td><td>the search settings, with safe defaults</td></tr>
+<tr><td>JINA_API_KEY, EMBED_MODEL</td><td>the embedding settings</td></tr>
+<tr><td>EMBED_DIM = int(env(&quot;EMBED_DIM&quot;, &quot;1024&quot;))</td><td>environment variables are always text; int(...) turns &quot;1024&quot; into the number 1024</td></tr>
+<tr><td>LLM_BASE_URL, LLM_API_KEY, LLM_MODEL</td><td>how to reach vLLM</td></tr>
+<tr><td>REDIS_URL, CACHE_TTL_SECONDS</td><td>cache address and lifetime</td></tr>
+<tr><td>PAPERS_BUCKET</td><td>S3 bucket name; empty means &quot;do not upload PDFs&quot;</td></tr>
+<tr><td>AGENT_URLS = [u.strip() for u in env(&quot;AGENT_URLS&quot;).split(&quot;,&quot;) if u.strip()]</td><td>turns &quot;a,b,c&quot; into the Python list [&quot;a&quot;, &quot;b&quot;, &quot;c&quot;] and skips empty pieces</td></tr>
+<tr><td>WORKER_MODE</td><td>local or remote (explained in Parts 5 and 6A)</td></tr>
+<tr><td>JWT_SECRET, JWT_MINUTES, API_USERNAME, API_PASSWORD, API_URL</td><td>API login settings; a token is valid for 60 minutes</td></tr>
+<tr><td>TELEGRAM_BOT_TOKEN</td><td>the bot token</td></tr>
+<tr><td>MIN_RELEVANT = 2</td><td>the supervisor needs at least 2 relevant chunks before it lets the Writer answer</td></tr>
+<tr><td>MAX_RETRIEVALS = 2</td><td>at most 2 searches before the Scout is called</td></tr>
+<tr><td>MAX_GENERATIONS = 2</td><td>at most 2 drafts if the Critic rejects the first one</td></tr>
+<tr><td>TOP_K = 8</td><td>how many chunks one search returns</td></tr>
+</table>
+<p><b>Step 22.</b> Test that config.py reads your .env:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">python -c &quot;from querymesh import config; print(config.LLM_MODEL, config.OPENSEARCH_URL, len(config.JWT_SECRET), config.JINA_API_KEY[:5])&quot;</pre>
+<p><b>You should see:</b> qwen3-4b <a href="http://localhost:9200">http://localhost:9200</a> 64 jina_</p>
+<p><b style="color:#bf1a1a">Watch out:</b> never paste the content of .env into a chat, a screenshot or Git. Section 2B.13 makes Git ignore it.</p>
+<p><b style="color:#1a7333">CHECKPOINT:</b> Step 22 printed 64 and jina_.</p>
+<p><b>If not:</b> 22 instead of 64 = JWT_SECRET is still CHANGE_ME-like text: repeat Steps 10-11 and save. CHANGE instead of jina_ = repeat Step 14 and save.</p>
+<h2>SECTION 2B.9 - GPU test with Docker</h2>
+<p><b>WHERE:</b> VS Code Terminal, folder ~/querymesh</p>
+<p><b>GOAL:</b> proof that Docker containers can use the GPU (vLLM runs in one).</p>
+<p><b>Step 1.</b> Check Docker can use the GPU:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">docker run --rm --gpus all public.ecr.aws/docker/library/ubuntu:24.04 nvidia-smi</pre>
+<p><b>You should see:</b> the same nvidia-smi table as in Section 2A.9 (NVIDIA RTX A6000), printed from inside a container.</p>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>If you see...</b></td><td style="background-color:#e0e0e0"><b>It means...</b></td><td style="background-color:#e0e0e0"><b>Do this next</b></td></tr>
+<tr><td>permission denied while trying to connect to the Docker daemon socket</td><td>your user is not in the docker group</td><td>run <span style="font-family:Roboto Mono">sudo usermod -aG docker ubuntu</span>, then click File &gt; Close Remote Connection, reconnect (Section 2A.10 Steps 6-10) and repeat Step 1</td></tr>
+<tr><td>could not select device driver &quot;&quot; with capabilities: [[gpu]]</td><td>NVIDIA container toolkit missing</td><td>you picked an image without &quot;with Docker&quot;; redeploy with the right image (Section 2A.7)</td></tr>
+<tr><td>toomanyrequests / rate limit</td><td>the image registry limits anonymous downloads</td><td>wait 10 minutes and try again</td></tr>
+<tr><td>Piece</td><td>What it means</td><td></td></tr>
+<tr><td>docker run --rm</td><td>start a container and delete it when it finishes</td><td></td></tr>
+<tr><td>--gpus all</td><td>give the container access to the GPU</td><td></td></tr>
+<tr><td>public.ecr.aws/docker/library/ubuntu:24.04</td><td>the official Ubuntu image from the AWS public mirror of Docker Hub (fewer download limits)</td><td></td></tr>
+<tr><td>nvidia-smi</td><td>the command run inside the container</td><td></td></tr>
+</table>
+<p><b style="color:#1a7333">CHECKPOINT:</b> Step 1 shows the GPU table.</p>
+<h2>SECTION 2B.10 - Start vLLM (the language model server)</h2>
+<p><b>WHERE:</b> VS Code Explorer and Terminal, folder ~/querymesh</p>
+<p><b>GOAL:</b> Qwen3-4B-Instruct-2507 answers on <a href="http://localhost:8000/v1">http://localhost:8000/v1</a> with your API key.</p>
+<p>FILE: scripts/start_vllm.sh</p>
+<p><b>Step 1.</b> Right-click the folder scripts.</p>
+<p><b>Step 2.</b> Click New File...</p>
+<p><b>Step 3.</b> Type start_vllm.sh and press Enter.</p>
+<p><b>Step 4.</b> Paste the grey box below.</p>
+<p><b>Step 5.</b> Press Ctrl+S.</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">#!/usr/bin/env bash
+# Start the language model server on the Hyperstack GPU (OpenAI-compatible API on port 8000).
+set -euo pipefail
+cd &quot;$(dirname &quot;$0&quot;)/..&quot;
+LLM_API_KEY=$(grep &#x27;^LLM_API_KEY=&#x27; .env | cut -d= -f2)
+
+docker rm -f vllm 2&gt;/dev/null || true
+docker run -d --name vllm --restart unless-stopped \
+  --gpus all --ipc=host -p 8000:8000 \
+  -v &quot;$HOME/.cache/huggingface:/root/.cache/huggingface&quot; \
+  vllm/vllm-openai:v0.32.0 \
+  --model Qwen/Qwen3-4B-Instruct-2507 \
+  --served-model-name qwen3-4b \
+  --max-model-len 32768 \
+  --gpu-memory-utilization 0.80 \
+  --api-key &quot;$LLM_API_KEY&quot;
+echo &quot;vLLM is starting. Follow the log with: docker logs -f vllm&quot;</pre>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
+<tr><td>#!/usr/bin/env bash</td><td>&quot;run this file with bash&quot;</td></tr>
+<tr><td>set -euo pipefail</td><td>stop at the first error, treat unknown variables as errors, and fail if any part of a pipe fails</td></tr>
+<tr><td>cd &quot;$(dirname &quot;$0&quot;)/..&quot;</td><td>go to the project folder (the folder above scripts/), wherever you start the script from</td></tr>
+<tr><td>LLM_API_KEY=$(grep &#x27;^LLM_API_KEY=&#x27; .env | cut -d= -f2)</td><td>read your LLM_API_KEY from .env: find the line, keep the text after =</td></tr>
+<tr><td>docker rm -f vllm 2&gt;/dev/null || true</td><td>delete an old container named vllm if there is one; no error if there is none</td></tr>
+<tr><td>docker run -d --name vllm</td><td>start a container in the background (-d) and call it vllm</td></tr>
+<tr><td>--restart unless-stopped</td><td>start it again automatically after a reboot or a Hyperstack restore</td></tr>
+<tr><td>--gpus all --ipc=host</td><td>give it the GPU, and the shared memory vLLM needs</td></tr>
+<tr><td>-p 8000:8000</td><td>port 8000 of the VM goes to port 8000 of the container</td></tr>
+<tr><td>-v &quot;$HOME/.cache/huggingface:/root/.cache/huggingface&quot;</td><td>keep the downloaded model (about 8 GB) on the VM disk, so it is downloaded only once</td></tr>
+<tr><td>vllm/vllm-openai:v0.32.0</td><td>the official vLLM image, version 0.32.0 (verify the tag exists on Docker Hub) [21]</td></tr>
+<tr><td>--model Qwen/Qwen3-4B-Instruct-2507</td><td>the model to download from Hugging Face and serve (Apache-2.0, no login needed) [22]</td></tr>
+<tr><td>--served-model-name qwen3-4b</td><td>the short name clients use (&quot;model&quot;: &quot;qwen3-4b&quot;); equals LLM_MODEL in .env</td></tr>
+<tr><td>--max-model-len 32768</td><td>the longest prompt + answer in tokens (our prompts are under 8,000)</td></tr>
+<tr><td>--gpu-memory-utilization 0.80</td><td>use at most 80% of the 48 GB, leaving room for Docling and other GPU work</td></tr>
+<tr><td>--api-key &quot;$LLM_API_KEY&quot;</td><td>refuse every request without Authorization: Bearer YOUR_KEY</td></tr>
+<tr><td>echo ...</td><td>print a hint</td></tr>
+</table>
+<p><b>Step 6.</b> Start vLLM:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">bash scripts/start_vllm.sh</pre>
+<p><b>You should see:</b> a long container id and &quot;vLLM is starting. Follow the log with: docker logs -f vllm&quot;. The first time, Docker downloads the image (about 10 GB, 3-8 minutes) before the id appears.</p>
+<p><b>Step 7.</b> Follow the log:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">docker logs -f vllm</pre>
+<p><b>Step 8.</b> Wait until the log shows &quot;Application startup complete.&quot; (first run: the model download adds 2-5 minutes).</p>
+<p><b>Step 9.</b> Press Ctrl+C to stop following the log (vLLM keeps running).</p>
+<p><b>Step 10.</b> Load your key into this terminal:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">export LLM_API_KEY=$(grep &#x27;^LLM_API_KEY=&#x27; .env | cut -d= -f2)</pre>
+<p><b>Step 11.</b> Ask vLLM which model it serves:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:8000/v1/models -H &quot;Authorization: Bearer $LLM_API_KEY&quot; | jq -r &#x27;.data[0].id&#x27;</pre>
+<p><b>You should see:</b> qwen3-4b</p>
+<p><b>Step 12.</b> Send a first chat message:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:8000/v1/chat/completions -H &quot;Authorization: Bearer $LLM_API_KEY&quot; -H &quot;Content-Type: application/json&quot; -d &#x27;{&quot;model&quot;: &quot;qwen3-4b&quot;, &quot;messages&quot;: [{&quot;role&quot;: &quot;user&quot;, &quot;content&quot;: &quot;In one sentence, what is arXiv?&quot;}], &quot;max_tokens&quot;: 60}&#x27; | jq -r &#x27;.choices[0].message.content&#x27;</pre>
+<p><b>You should see:</b> one sentence such as &quot;arXiv is a free online repository of research papers in physics, mathematics, computer science and related fields.&quot;</p>
+<p><b>Step 13.</b> Check GPU memory:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">nvidia-smi --query-gpu=memory.used,memory.total --format=csv</pre>
+<p><b>You should see:</b> about 39000 MiB used of 49140 MiB (80%).</p>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>If you see...</b></td><td style="background-color:#e0e0e0"><b>It means...</b></td><td style="background-color:#e0e0e0"><b>Do this next</b></td></tr>
+<tr><td>{&quot;error&quot;:&quot;Unauthorized&quot;} or 401</td><td>the key in the request differs from the key vLLM started with</td><td>repeat Step 10; if you changed .env after Step 6, run Step 6 again</td></tr>
+<tr><td>curl: (7) Failed to connect</td><td>vLLM is still starting or crashed</td><td>run <span style="font-family:Roboto Mono">docker logs --tail 50 vllm</span> and wait for &quot;Application startup complete.&quot;</td></tr>
+<tr><td>manifest for vllm/vllm-openai:v0.32.0 not found</td><td>that tag does not exist (yet)</td><td>open <a href="https://hub.docker.com/r/vllm/vllm-openai/tags">https://hub.docker.com/r/vllm/vllm-openai/tags</a>, pick the newest vX.Y.Z tag and change line 11 of start_vllm.sh</td></tr>
+<tr><td>CUDA out of memory</td><td>another program uses the GPU</td><td>run <span style="font-family:Roboto Mono">nvidia-smi</span> to see it; or lower 0.80 to 0.70 and repeat Step 6</td></tr>
+<tr><td>&quot;CUDA driver version is insufficient&quot;</td><td>the image needs a newer driver</td><td>deploy the VM with the &quot;R595 CUDA 13.2 with Docker&quot; image, or use an older vLLM tag</td></tr>
+</table>
+<p><b style="color:#bf1a1a">Watch out:</b> port 8000 is open on all VM addresses, but the Hyperstack firewall blocks it from the internet (only port 22 is open) and vLLM checks the API key. Keep it that way until Section 6B.12.</p>
+<p><b style="color:#1a7333">CHECKPOINT:</b> Step 11 prints qwen3-4b and Step 12 prints a sentence.</p>
+<h2>SECTION 2B.11 - Start OpenSearch (the search engine)</h2>
+<p><b>WHERE:</b> VS Code Explorer and Terminal, folder ~/querymesh</p>
+<p><b>GOAL:</b> OpenSearch 3.9.0 answers on <a href="http://localhost:9200">http://localhost:9200</a> with the k-NN and neural-search plugins.</p>
+<p>FILE: scripts/start_opensearch.sh</p>
+<p><b>Step 1.</b> Right-click the folder scripts.</p>
+<p><b>Step 2.</b> Click New File...</p>
+<p><b>Step 3.</b> Type start_opensearch.sh and press Enter.</p>
+<p><b>Step 4.</b> Paste the grey box below.</p>
+<p><b>Step 5.</b> Press Ctrl+S.</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">#!/usr/bin/env bash
+# Start OpenSearch (search engine) on the VM, port 9200, data kept in a Docker volume.
+set -euo pipefail
+sudo sysctl -w vm.max_map_count=262144   # OpenSearch refuses to start without this
+
+docker rm -f opensearch 2&gt;/dev/null || true
+docker run -d --name opensearch --restart unless-stopped \
+  -p 127.0.0.1:9200:9200 -p 172.17.0.1:9200:9200 \
+  -e discovery.type=single-node \
+  -e DISABLE_SECURITY_PLUGIN=true \
+  -e DISABLE_INSTALL_DEMO_CONFIG=true \
+  -e OPENSEARCH_JAVA_OPTS=&quot;-Xms2g -Xmx2g&quot; \
+  -v opensearch-data:/usr/share/opensearch/data \
+  opensearchproject/opensearch:3.9.0
+echo &quot;OpenSearch is starting. Test in 30 seconds with: curl -s localhost:9200&quot;</pre>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
+<tr><td>set -euo pipefail</td><td>stop at the first error</td></tr>
+<tr><td>sudo sysctl -w vm.max_map_count=262144</td><td>allow a program to map more memory areas; OpenSearch refuses to start with the Linux default of 65530 [16]</td></tr>
+<tr><td>docker rm -f opensearch 2&gt;/dev/null || true</td><td>remove an old container with the same name (your data stays in the volume)</td></tr>
+<tr><td>docker run -d --name opensearch --restart unless-stopped</td><td>start in the background, restart after reboot or restore</td></tr>
+<tr><td>-p 127.0.0.1:9200:9200</td><td>publish port 9200 ONLY on the VM itself (localhost)</td></tr>
+<tr><td>-p 172.17.0.1:9200:9200</td><td>also publish it on the Docker bridge address, so containers and the kind cluster on this VM can reach it (Part 6B); never on the public IP</td></tr>
+<tr><td>-e discovery.type=single-node</td><td>one node, no cluster partners to look for</td></tr>
+<tr><td>-e DISABLE_SECURITY_PLUGIN=true</td><td>no TLS and no password: acceptable only because nothing outside the VM can reach it</td></tr>
+<tr><td>-e DISABLE_INSTALL_DEMO_CONFIG=true</td><td>skip the demo certificates and the admin password check</td></tr>
+<tr><td>-e OPENSEARCH_JAVA_OPTS=&quot;-Xms2g -Xmx2g&quot;</td><td>give the Java engine 2 GB of memory</td></tr>
+<tr><td>-v opensearch-data:/usr/share/opensearch/data</td><td>keep the index in a Docker volume called opensearch-data, so it survives restarts</td></tr>
+<tr><td>opensearchproject/opensearch:3.9.0</td><td>the official image; 3.x includes the k-NN and neural-search plugins that hybrid search needs [14][16]</td></tr>
+</table>
+<p><b>Step 6.</b> Make the memory setting permanent (it must survive reboots and Hyperstack restores):</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">echo &#x27;vm.max_map_count=262144&#x27; | sudo tee /etc/sysctl.d/99-opensearch.conf</pre>
+<p><b>You should see:</b> vm.max_map_count=262144</p>
+<p><b>Step 7.</b> Check that the Docker bridge address is 172.17.0.1:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">ip -4 addr show docker0 | grep inet</pre>
+<p><b>You should see:</b> inet 172.17.0.1/16 ...</p>
+<p><b>Step 8.</b> Start OpenSearch:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">bash scripts/start_opensearch.sh</pre>
+<p><b>You should see:</b> &quot;vm.max_map_count = 262144&quot;, a container id, and &quot;OpenSearch is starting...&quot;.</p>
+<p><b>Step 9.</b> Wait 30 seconds, then ask for its version:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:9200 | jq -r &#x27;.version.number&#x27;</pre>
+<p><b>You should see:</b> 3.9.0</p>
+<p><b>Step 10.</b> Check that the two plugins for hybrid search are there:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">curl -s &quot;localhost:9200/_cat/plugins?h=component&quot; | sort -u | grep -E &quot;knn|neural&quot;</pre>
+<p><b>You should see:</b> opensearch-knn and opensearch-neural-search</p>
+<p><b>Step 11.</b> Check the cluster health:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:9200/_cluster/health | jq -r .status</pre>
+<p><b>You should see:</b> green</p>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>If you see...</b></td><td style="background-color:#e0e0e0"><b>It means...</b></td><td style="background-color:#e0e0e0"><b>Do this next</b></td></tr>
+<tr><td>curl: (52) Empty reply or (7) Failed to connect</td><td>still starting</td><td>wait 30 more seconds and repeat Step 9</td></tr>
+<tr><td>the container stops: docker ps does not list opensearch</td><td>it crashed at start</td><td>run <span style="font-family:Roboto Mono">docker logs --tail 30 opensearch</span>; &quot;max virtual memory areas vm.max_map_count [65530] is too low&quot; = repeat Steps 6 and 8</td></tr>
+<tr><td>Step 7 shows another address, for example 172.18.0.1</td><td>your Docker bridge uses a different range</td><td>change 172.17.0.1 in line 8 of start_opensearch.sh to the address you saw and repeat Step 8 (and use that address wherever this manual says 172.17.0.1)</td></tr>
+<tr><td>yellow in Step 11</td><td>an index wants a replica copy on a second node</td><td>fine for a single node; Part 4 creates indexes with 0 replicas</td></tr>
+</table>
+<p><b style="color:#1a7333">CHECKPOINT:</b> Steps 9-11 print 3.9.0, the two plugin names, and green.</p>
+<h2>SECTION 2B.12 - Install FakeCloud (free AWS) and the AWS CLI</h2>
+<p><b>WHERE:</b> VS Code Terminal, folder ~/querymesh</p>
+<p><b>GOAL:</b> the aws command works against FakeCloud now, and against real AWS when you choose, with one command to switch.</p>
+<p>BEFORE YOU START: what FakeCloud is. FakeCloud is an open-source program that pretends to be AWS on your own machine at <a href="http://localhost:4566">http://localhost:4566</a> [6]. You use the normal aws command; only the address changes. It supports S3, ECR (real docker push), IAM, STS, Secrets Manager, CloudWatch Logs and the ELBv2 load-balancer API. Its EKS is control plane only: it remembers the cluster you &quot;create&quot; but has no real Kubernetes inside, so in Part 6B you use kind for the real cluster [8]. It has no GPU; it is for practising the AWS steps for free.</p>
+<p><b>Step 1.</b> Download the AWS CLI v2 installer [44]:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">cd /tmp &amp;&amp; curl -s &quot;https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip&quot; -o awscliv2.zip</pre>
+<p><b>Step 2.</b> Unpack and install it:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">unzip -q awscliv2.zip &amp;&amp; sudo ./aws/install &amp;&amp; cd ~/querymesh</pre>
+<p><b>Step 3.</b> Check:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">aws --version</pre>
+<p><b>You should see:</b> aws-cli/2.x.x Python/3.x Linux/...</p>
+<p><b>Step 4.</b> Install FakeCloud version 0.51.0 (pinned, so your results match this manual) [7]:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">curl -fsSL https://fakecloud.dev/install.sh | bash -s -- --version v0.51.0</pre>
+<p><b>You should see:</b> &quot;binary: /usr/local/bin/fakecloud&quot; and &quot;Start the emulator: fakecloud&quot;</p>
+<p><b>Step 5.</b> Create a folder for FakeCloud&#x27;s saved state:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">mkdir -p ~/fakecloud-data</pre>
+<p><b>Step 6.</b> Start FakeCloud in the background:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">nohup fakecloud --storage-mode persistent --data-path ~/fakecloud-data &gt; ~/fakecloud.log 2&gt;&amp;1 &amp;</pre>
+<p><b>Step 7.</b> Check it is healthy:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">curl -s http://localhost:4566/_fakecloud/health | head -c 120</pre>
+<p><b>You should see:</b> {&quot;status&quot;:&quot;ok&quot;,&quot;version&quot;:&quot;0.51.0&quot;,&quot;services&quot;:[...</p>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Piece</b></td><td style="background-color:#e0e0e0"><b>What it does</b></td></tr>
+<tr><td>nohup ... &amp;</td><td>run in the background and keep running after you close the terminal</td></tr>
+<tr><td>--storage-mode persistent --data-path ~/fakecloud-data</td><td>FakeCloud saves what you create, so it survives a restart</td></tr>
+<tr><td>&gt; ~/fakecloud.log 2&gt;&amp;1</td><td>write its messages into ~/fakecloud.log</td></tr>
+</table>
+<p>Now create the two switch scripts. FILE 1: scripts/use_fakecloud.sh</p>
+<p><b>Step 8.</b> Right-click the folder scripts.</p>
+<p><b>Step 9.</b> Click New File...</p>
+<p><b>Step 10.</b> Type use_fakecloud.sh and press Enter.</p>
+<p><b>Step 11.</b> Paste the grey box below.</p>
+<p><b>Step 12.</b> Press Ctrl+S.</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2"># Use FakeCloud (free AWS on this VM). Run with:  source scripts/use_fakecloud.sh
+export AWS_ENDPOINT_URL=http://localhost:4566
+export AWS_ACCESS_KEY_ID=test
+export AWS_SECRET_ACCESS_KEY=test
+export AWS_DEFAULT_REGION=us-east-1
+echo &quot;Target: FakeCloud ($AWS_ENDPOINT_URL)&quot;</pre>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Line</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
+<tr><td>export AWS_ENDPOINT_URL=<a href="http://localhost:4566">http://localhost:4566</a></td><td>the ONE variable that sends every aws command and every boto3 call to FakeCloud instead of Amazon</td></tr>
+<tr><td>export AWS_ACCESS_KEY_ID=test, AWS_SECRET_ACCESS_KEY=test</td><td>fake keys; FakeCloud accepts any value</td></tr>
+<tr><td>export AWS_DEFAULT_REGION=us-east-1</td><td>the region used everywhere in this manual</td></tr>
+<tr><td>echo &quot;Target: FakeCloud ...&quot;</td><td>prints where your commands go, so you always know</td></tr>
+</table>
+<p>FILE 2: scripts/use_aws.sh</p>
+<p><b>Step 13.</b> Right-click the folder scripts.</p>
+<p><b>Step 14.</b> Click New File...</p>
+<p><b>Step 15.</b> Type use_aws.sh and press Enter.</p>
+<p><b>Step 16.</b> Paste the grey box below.</p>
+<p><b>Step 17.</b> Press Ctrl+S.</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2"># Use real AWS (the keys you saved with &quot;aws configure&quot;). Run with:  source scripts/use_aws.sh
+unset AWS_ENDPOINT_URL AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+export AWS_DEFAULT_REGION=us-east-1
+echo &quot;Target: REAL AWS - this costs money&quot;</pre>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Line</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
+<tr><td>unset AWS_ENDPOINT_URL AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY</td><td>remove the FakeCloud settings from this terminal; the aws command then uses the real keys saved by aws configure</td></tr>
+<tr><td>export AWS_DEFAULT_REGION=us-east-1</td><td>same region as FakeCloud</td></tr>
+<tr><td>echo &quot;Target: REAL AWS - this costs money&quot;</td><td>a loud reminder</td></tr>
+</table>
+<p><b style="color:#bf1a1a">Watch out:</b> run these scripts with source (source scripts/use_fakecloud.sh), not with bash. With bash, the exports disappear when the script ends.</p>
+<p><b>Step 18.</b> Do every row of YOUR column in the table below, top to bottom. Do the white column now; do the blue column only if you will use real AWS.</p>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Step</b></td><td style="background-color:#e0e0e0"><b>FakeCloud (free practice)</b></td><td style="background-color:#9fc5e8"><b>Real AWS (same step)</b></td></tr>
+<tr><td>1 Account</td><td>nothing to do: FakeCloud has one built-in account, 123456789012</td><td style="background-color:#cfe2f3">AWS console (<a href="https://console.aws.amazon.com">https://console.aws.amazon.com</a>) &gt; search IAM &gt; Users &gt; Create user &gt; User name querymesh-admin &gt; Next &gt; Attach policies directly &gt; tick AdministratorAccess &gt; Next &gt; Create user</td></tr>
+<tr><td>2 Access keys</td><td>nothing to do (any keys work)</td><td style="background-color:#cfe2f3">IAM &gt; Users &gt; querymesh-admin &gt; Security credentials tab &gt; Create access key &gt; Command Line Interface (CLI) &gt; tick the confirmation &gt; Next &gt; Create access key &gt; copy the Access key and the Secret access key into secrets.txt</td></tr>
+<tr><td>3 Save the keys on the VM</td><td>nothing to do</td><td style="background-color:#cfe2f3"><span style="font-family:Roboto Mono">aws configure</span> then paste the Access key ID, paste the Secret access key, type <span style="font-family:Roboto Mono">us-east-1</span>, type <span style="font-family:Roboto Mono">json</span></td></tr>
+<tr><td>4 Choose the target</td><td><span style="font-family:Roboto Mono">source scripts/use_fakecloud.sh</span></td><td style="background-color:#cfe2f3"><span style="font-family:Roboto Mono">source scripts/use_aws.sh</span></td></tr>
+<tr><td>5 Test who you are</td><td><span style="font-family:Roboto Mono">aws sts get-caller-identity</span></td><td style="background-color:#cfe2f3"><span style="font-family:Roboto Mono">aws sts get-caller-identity</span></td></tr>
+<tr><td>You should see</td><td>&quot;Account&quot;: &quot;123456789012&quot; (FakeCloud&#x27;s fake account)</td><td style="background-color:#cfe2f3">your real 12-digit account number and &quot;arn:aws:iam::...:user/querymesh-admin&quot;</td></tr>
+<tr><td>6 Safety</td><td>nothing to do</td><td style="background-color:#cfe2f3">AWS console &gt; Billing and Cost Management &gt; Budgets &gt; Create budget &gt; Use a template &gt; Monthly cost budget &gt; Budgeted amount 10 &gt; your e-mail &gt; Create budget. Also enable MFA on the root user (account menu &gt; Security credentials &gt; Assign MFA device)</td></tr>
+<tr><td>7 Check the target any time</td><td><span style="font-family:Roboto Mono">echo $AWS_ENDPOINT_URL</span> prints <a href="http://localhost:4566">http://localhost:4566</a></td><td style="background-color:#cfe2f3"><span style="font-family:Roboto Mono">echo $AWS_ENDPOINT_URL</span> prints an empty line</td></tr>
+</table>
+<p><b style="color:#bf1a1a">Watch out:</b> export lines only last for the current terminal. In a new terminal, run source scripts/use_fakecloud.sh (or use_aws.sh) again before any aws command.</p>
+<p><b style="color:#bf1a1a">Watch out:</b> never use root-user keys; never put access keys in code or Git. The .env file has only the fake test keys for FakeCloud.</p>
+<p><b style="color:#1a7333">CHECKPOINT:</b> after source scripts/use_fakecloud.sh, aws sts get-caller-identity returns 123456789012.</p>
+<p><b>If not:</b> &quot;Could not connect to the endpoint URL&quot; = FakeCloud is not running: repeat Step 6 and read tail ~/fakecloud.log. &quot;Unable to locate credentials&quot; in the blue column = repeat row 3.</p>
+<h2>SECTION 2B.13 - Git and GitHub (your portfolio and, later, CI/CD)</h2>
+<p><b>WHERE:</b> VS Code Explorer and Terminal, folder ~/querymesh, then github.com in your browser</p>
+<p><b>GOAL:</b> your project is version-controlled, secrets are never committed, and the code is on GitHub in a repository called querymesh.</p>
+<p>FILE: .gitignore in the top folder QUERYMESH</p>
+<p><b>Step 1.</b> Right-click the top folder QUERYMESH.</p>
+<p><b>Step 2.</b> Click New File...</p>
+<p><b>Step 3.</b> Type .gitignore and press Enter.</p>
+<p><b>Step 4.</b> Paste the grey box below.</p>
+<p><b>Step 5.</b> Press Ctrl+S.</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">.venv/
+.env
+data/
+__pycache__/
+.pytest_cache/
+.logfire/
+*.egg-info/</pre>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Line</b></td><td style="background-color:#e0e0e0"><b>Why</b></td></tr>
+<tr><td>.venv/</td><td>the environment is big and can be recreated with Section 2B.7</td></tr>
+<tr><td>.env</td><td>your secrets must NEVER be in Git (the .env.example template is fine)</td></tr>
+<tr><td>data/</td><td>downloaded PDFs are large and can be downloaded again</td></tr>
+<tr><td>__pycache__/, .pytest_cache/, *.egg-info/</td><td>temporary files Python and pytest create</td></tr>
+<tr><td>.logfire/</td><td>Logfire&#x27;s local credentials folder (Section 6A.5)</td></tr>
+</table>
+<p><b>Step 6.</b> Set your name and e-mail for Git (replace both):</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">git config --global user.name &quot;YOUR NAME&quot; &amp;&amp; git config --global user.email &quot;you@example.com&quot;</pre>
+<p><b>Step 7.</b> Start the repository with the branch name main:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">git init -b main</pre>
+<p><b>Step 8.</b> Add all files and make the first commit:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">git add . &amp;&amp; git commit -m &quot;QueryMesh skeleton: config, scripts, pyproject&quot;</pre>
+<p><b>You should see:</b> &quot;[main (root-commit) ...] QueryMesh skeleton...&quot; and a list of files. .env must NOT be in that list.</p>
+<p><b>Step 9.</b> Check .env is ignored:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">git status --ignored | grep -E &quot;^\s+\.env$&quot;</pre>
+<p><b>You should see:</b> .env (listed under &quot;Ignored files&quot;)</p>
+<p>Now put the code on GitHub.</p>
+<p><b>Step 10.</b> In your browser open <a href="https://github.com/new">https://github.com/new</a></p>
+<p><b>Step 11.</b> In Repository name type querymesh</p>
+<p><b>Step 12.</b> Choose Private.</p>
+<p><b>Step 13.</b> Leave &quot;Add a README file&quot; OFF (you already have files).</p>
+<p><b>Step 14.</b> Click Create repository.</p>
+<p><b>Step 15.</b> Back in the VS Code Terminal, create an SSH key for GitHub on the VM:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">ssh-keygen -t ed25519 -C &quot;querymesh-vm&quot; -f ~/.ssh/id_ed25519 -N &quot;&quot;</pre>
+<p><b>Step 16.</b> Print its public part:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">cat ~/.ssh/id_ed25519.pub</pre>
+<p><b>Step 17.</b> Select the whole line (ssh-ed25519 ... querymesh-vm) and copy it (Ctrl+C).</p>
+<p><b>Step 18.</b> In your browser open <a href="https://github.com/settings/keys">https://github.com/settings/keys</a></p>
+<p><b>Step 19.</b> Click New SSH key.</p>
+<p><b>Step 20.</b> In Title type querymesh-gpu</p>
+<p><b>Step 21.</b> Click in Key and press Ctrl+V.</p>
+<p><b>Step 22.</b> Click Add SSH key.</p>
+<p><b>Step 23.</b> Back in the terminal, test the connection:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">ssh -T git@github.com</pre>
+<p><b>Step 24.</b> If asked &quot;Are you sure you want to continue connecting&quot;, type yes and press Enter.</p>
+<p><b>You should see:</b> &quot;Hi GITHUB_USER! You&#x27;ve successfully authenticated, but GitHub does not provide shell access.&quot;</p>
+<p><b>Step 25.</b> Connect your folder to the GitHub repository (replace GITHUB_USER):</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">git remote add origin git@github.com:GITHUB_USER/querymesh.git</pre>
+<p><b>Step 26.</b> Upload:</p>
+<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">git push -u origin main</pre>
+<p><b>You should see:</b> &quot;Branch &#x27;main&#x27; set up to track remote branch &#x27;main&#x27; from &#x27;origin&#x27;.&quot;</p>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Placeholder</b></td><td style="background-color:#e0e0e0"><b>Replace with</b></td><td style="background-color:#e0e0e0"><b>Example</b></td></tr>
+<tr><td>YOUR NAME, you@example.com</td><td>your name and the e-mail of your GitHub account</td><td>Karthik K, karthik@example.com</td></tr>
+<tr><td>GITHUB_USER</td><td>your GitHub user name (top-right avatar menu on github.com)</td><td>karthik-dev</td></tr>
+</table>
+<p><b style="color:#bf1a1a">Watch out:</b> commit after every working section (git add . &amp;&amp; git commit -m &quot;what you did&quot; &amp;&amp; git push). If the Hyperstack VM is ever lost, your code is safe on GitHub.</p>
+<p><b style="color:#1a7333">CHECKPOINT:</b> <a href="https://github.com/GITHUB_USER/querymesh">https://github.com/GITHUB_USER/querymesh</a> shows your files and no .env file.</p>
+<p><b>If not:</b> &quot;Permission denied (publickey)&quot; in Step 23 = the key was not added: repeat Steps 16-22. &quot;remote origin already exists&quot; in Step 25 = run git remote set-url origin git@github.com:GITHUB_USER/querymesh.git</p>
+<h2>SECTION 2B.14 - PART 2 RESULT CHECK (all must be true before Part 4)</h2>
+<p><b>WHERE:</b> VS Code Terminal, folder ~/querymesh</p>
+<p><b>GOAL:</b> prove the whole base works before you build on it.</p>
+<p><b>Step 1.</b> Run each command in the table and compare with the Expected column.</p>
+<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
+<tr><td style="background-color:#e0e0e0"><b>Check</b></td><td style="background-color:#e0e0e0"><b>Command</b></td><td style="background-color:#e0e0e0"><b>Expected</b></td></tr>
+<tr><td>GPU visible</td><td><span style="font-family:Roboto Mono">nvidia-smi --query-gpu=name --format=csv,noheader</span></td><td>NVIDIA RTX A6000</td></tr>
+<tr><td>environment active</td><td><span style="font-family:Roboto Mono">which python</span></td><td>/home/ubuntu/querymesh/.venv/bin/python</td></tr>
+<tr><td>libraries</td><td><span style="font-family:Roboto Mono">python -c &quot;import langgraph, fastmcp, a2a, docling; print(&#x27;ok&#x27;)&quot;</span></td><td>ok</td></tr>
+<tr><td>settings</td><td><span style="font-family:Roboto Mono">python -c &quot;from querymesh import config; print(config.LLM_MODEL)&quot;</span></td><td>qwen3-4b</td></tr>
+<tr><td>vLLM</td><td><span style="font-family:Roboto Mono">curl -s localhost:8000/v1/models -H &quot;Authorization: Bearer $LLM_API_KEY&quot; | jq -r &#x27;.data[0].id&#x27;</span></td><td>qwen3-4b</td></tr>
+<tr><td>OpenSearch</td><td><span style="font-family:Roboto Mono">curl -s localhost:9200 | jq -r &#x27;.version.number&#x27;</span></td><td>3.9.0</td></tr>
+<tr><td>FakeCloud</td><td><span style="font-family:Roboto Mono">curl -s localhost:4566/_fakecloud/health | jq -r .status</span></td><td>ok</td></tr>
+<tr><td>AWS CLI</td><td><span style="font-family:Roboto Mono">aws --version</span></td><td>aws-cli/2...</td></tr>
+<tr><td>Git</td><td><span style="font-family:Roboto Mono">git log --oneline | head -1</span></td><td>your first commit</td></tr>
+<tr><td>tmux</td><td><span style="font-family:Roboto Mono">tmux ls</span></td><td>no error (or &quot;no server running&quot;)</td></tr>
+</table>
+<p><b style="color:#bf1a1a">Watch out:</b> if the vLLM row prints nothing, the variable LLM_API_KEY is not set in this terminal: run the export line from Section 2B.10 Step 10 first.</p>
+<p><b style="color:#1a7333">CHECKPOINT:</b> every row matches. Read QM Part 3 - Core Idea next (no typing), then start QM Part 4.</p>
+<p><b>If not:</b> go back to the section of the failing row (2B.7, 2B.8, 2B.10, 2B.11, 2B.12 or 2B.13) and repeat its CHECKPOINT.</p>
+</body></html>
