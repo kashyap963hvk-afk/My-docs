@@ -1,142 +1,30 @@
 <html><head><meta charset="utf-8"></head><body style="font-family:Arial">
-<h2>SECTION 6A.9 - Create the Gradio web chat (streams each agent step)</h2>
-<p><b>WHERE:</b> VS Code Explorer, folder <span style="font-family:Roboto Mono">querymesh</span>, then the Terminal, then your laptop&#x27;s browser</p>
-<p><b>GOAL:</b> a web page where you type a question and watch the agents work live, then read the cited answer.</p>
-<p><b>Step 1.</b> Right-click the folder <span style="font-family:Roboto Mono">querymesh</span>.</p>
-<p><b>Step 2.</b> Click <b>New File...</b>.</p>
-<p><b>Step 3.</b> Type <span style="font-family:Roboto Mono">api_client.py</span> and press Enter.</p>
-<p><b>Step 4.</b> Paste the grey box below.</p>
-<p><b>Step 5.</b> Press Ctrl+S.</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;Small client for the QueryMesh API, shared by the Gradio and Telegram interfaces.&quot;&quot;&quot;
-import json
-
-import httpx
-
-from querymesh import config
-
-
-def get_token() -&gt; str:
-    response = httpx.post(f&quot;{config.API_URL}/token&quot;, timeout=30,
-                          data={&quot;username&quot;: config.API_USERNAME, &quot;password&quot;: config.API_PASSWORD})
-    response.raise_for_status()
-    return response.json()[&quot;access_token&quot;]
-
-
-async def stream_question(question: str, token: str):
-    &quot;&quot;&quot;Yield (&#x27;step&#x27;, text) and finally (&#x27;final&#x27;, dict) from the API&#x27;s Server-Sent Events.&quot;&quot;&quot;
-    headers = {&quot;Authorization&quot;: f&quot;Bearer {token}&quot;}
-    async with httpx.AsyncClient(timeout=600) as http:
-        async with http.stream(&quot;POST&quot;, f&quot;{config.API_URL}/ask/stream&quot;,
-                               json={&quot;question&quot;: question}, headers=headers) as response:
-            response.raise_for_status()
-            event = &quot;message&quot;
-            async for line in response.aiter_lines():
-                if line.startswith(&quot;event: &quot;):
-                    event = line[len(&quot;event: &quot;):]
-                elif line.startswith(&quot;data: &quot;):
-                    yield event, json.loads(line[len(&quot;data: &quot;):])
-
-
-def format_final(final: dict) -&gt; str:
-    sources = &quot;\n&quot;.join(f&quot;[{c[&#x27;n&#x27;]}] {c[&#x27;title&#x27;]} - {c[&#x27;url&#x27;]}&quot; for c in final.get(&quot;citations&quot;, []))
-    flag = &quot; (from cache)&quot; if final.get(&quot;cached&quot;) else &quot;&quot;
-    return f&quot;{final.get(&#x27;answer&#x27;, &#x27;&#x27;)}\n\nSources{flag}:\n{sources or &#x27;none&#x27;}&quot;</pre>
-<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
-<tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
-<tr><td><span style="font-family:Roboto Mono">def get_token()</span></td><td>logs in to the API with API_USERNAME and API_PASSWORD and returns the JWT. Both user interfaces use it</td></tr>
-<tr><td><span style="font-family:Roboto Mono">async def stream_question(question, token)</span></td><td>calls /ask/stream and turns the SSE lines back into (&quot;step&quot;, text) and (&quot;final&quot;, dict) pairs</td></tr>
-<tr><td><span style="font-family:Roboto Mono">httpx.AsyncClient(timeout=600)</span></td><td>allow up to 10 minutes for a long agent run</td></tr>
-<tr><td><span style="font-family:Roboto Mono">http.stream(&quot;POST&quot;, ...)</span></td><td>keep the connection open and read the answer piece by piece</td></tr>
-<tr><td><span style="font-family:Roboto Mono">response.raise_for_status()</span></td><td>stop with a clear error on 401 or 500</td></tr>
-<tr><td><span style="font-family:Roboto Mono">if line.startswith(&quot;event: &quot;)</span></td><td>remember the event name (step or final)</td></tr>
-<tr><td><span style="font-family:Roboto Mono">elif line.startswith(&quot;data: &quot;): yield event, json.loads(...)</span></td><td>the data line holds the JSON; hand it to the caller together with the event name</td></tr>
-<tr><td><span style="font-family:Roboto Mono">def format_final(final)</span></td><td>turns the final result into readable text: the answer, then &quot;Sources:&quot; with one line per citation, and &quot;(from cache)&quot; when it was a cache hit</td></tr>
-</table>
-<p><b>Step 6.</b> Right-click the folder <span style="font-family:Roboto Mono">querymesh</span>.</p>
-<p><b>Step 7.</b> Click <b>New File...</b>.</p>
-<p><b>Step 8.</b> Type <span style="font-family:Roboto Mono">ui_gradio.py</span> and press Enter.</p>
-<p><b>Step 9.</b> Paste the grey box below.</p>
-<p><b>Step 10.</b> Press Ctrl+S.</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;Gradio web chat. Shows each agent step live, then the cited answer.&quot;&quot;&quot;
-import gradio as gr
-
-from querymesh import observability
-from querymesh.api_client import format_final, get_token, stream_question
-
-observability.setup(&quot;querymesh-gradio&quot;)
-
-
-async def respond(message: str, history: list):
-    token = get_token()
-    progress = &quot;&quot;
-    async for kind, value in stream_question(message, token):
-        if kind == &quot;step&quot;:
-            progress += f&quot;- {value}\n&quot;
-            yield f&quot;Working...\n{progress}&quot;
-        else:
-            yield f&quot;{format_final(value)}\n\nAgent steps:\n{progress}&quot;
-
-
-demo = gr.ChatInterface(
-    fn=respond,
-    title=&quot;QueryMesh&quot;,
-    description=&quot;Ask a question about recent arXiv papers. Five agents search, grade, write and check.&quot;,
-    examples=[&quot;How does reciprocal rank fusion combine BM25 and vector search?&quot;,
-              &quot;What are recent methods to reduce hallucination in RAG?&quot;],
-)
-
-if __name__ == &quot;__main__&quot;:
-    demo.launch(server_name=&quot;0.0.0.0&quot;, server_port=7860)</pre>
-<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
-<tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
-<tr><td><span style="font-family:Roboto Mono">import gradio as gr</span></td><td>Gradio builds web interfaces for Python functions [29]</td></tr>
-<tr><td><span style="font-family:Roboto Mono">async def respond(message, history)</span></td><td>Gradio calls this for every chat message. history = earlier messages (we do not need them)</td></tr>
-<tr><td><span style="font-family:Roboto Mono">token = get_token()</span></td><td>log in to our API</td></tr>
-<tr><td>`progress += f&quot;- {value}<br>&quot;<span style="font-family:Roboto Mono"> and </span>yield f&quot;Working...<br>{progress}&quot;`</td><td>each yield replaces the bot&#x27;s reply on the page, so the user sees the list of steps grow</td></tr>
-<tr><td>`yield f&quot;{format_final(value)}<br><br>Agent steps:<br>{progress}&quot;`</td><td>the last yield shows the answer, the sources and the steps</td></tr>
-<tr><td><span style="font-family:Roboto Mono">gr.ChatInterface(fn=respond, title=..., description=..., examples=[...])</span></td><td>a ready-made chat page; because respond is a generator, Gradio streams it automatically</td></tr>
-<tr><td><span style="font-family:Roboto Mono">demo.launch(server_name=&quot;0.0.0.0&quot;, server_port=7860)</span></td><td>serve the page on port 7860 on all interfaces of the VM</td></tr>
-</table>
-<p><b>Step 11.</b> Start the web chat in a new tmux window:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">tmux new-window -t agents -n gradio &quot;cd ~/querymesh &amp;&amp; .venv/bin/python -m querymesh.ui_gradio; bash&quot;</pre>
-<p><b>Step 12.</b> In VS Code click the <b>PORTS</b> tab (next to TERMINAL).</p>
-<p><b>Step 13.</b> Click <b>Forward a Port</b>.</p>
-<p><b>Step 14.</b> Type 7860 and press Enter.</p>
-<p><b>Step 15.</b> On your laptop open <a href="http://localhost:7860">http://localhost:7860</a></p>
-<p><b>You should see:</b> a page titled QueryMesh with a chat box and two example questions.</p>
-<p><b>Step 16.</b> Click the first example question.</p>
-<p><b>You should see:</b> &quot;Working...&quot; and a growing list (- retriever: ..., - grader: ..., ...), then the answer with Sources and Agent steps.</p>
-<p><b>Step 17.</b> Click the same example again.</p>
-<p><b>You should see:</b> the answer appears almost at once with &quot;Sources (from cache):&quot;.</p>
-<p><b style="color:#bf1a1a">Watch out:</b> the web page itself has no login in this project; anyone who can reach port 7860 can ask questions. That is why we reach it only through VS Code port forwarding (the Hyperstack firewall keeps 7860 closed). In Part 6B it sits behind the load balancer; Part 7 lists how to add a login.</p>
-<p><b style="color:#1a7333">CHECKPOINT:</b> the page shows the steps live and then a cited answer.</p>
-<p><b>If not:</b> &quot;Connection refused&quot; in the page means the API window is not running (Section 6A.7 Step 11).</p>
 <h2>SECTION 6A.10 - Create the Telegram bot (edits its reply live)</h2>
 <p><b>WHERE:</b> the Telegram app (phone or desktop), VS Code, the Terminal</p>
 <p><b>GOAL:</b> a Telegram bot: you send a question, it replies &quot;Working...&quot; and edits that message as the agents work, then shows the cited answer.</p>
-<p><b>Step 1.</b> Open Telegram and search for <span style="font-family:Roboto Mono">@BotFather</span> (the official one has a blue check mark).</p>
+<p><b>Step 1.</b> Open Telegram and search for <span style="font-family:'Roboto Mono'">@BotFather</span> (the official one has a blue check mark).</p>
 <p><b>Step 2.</b> Tap <b>Start</b> (or send /start).</p>
 <p><b>Step 3.</b> Send:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">/newbot</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">/newbot</pre>
 <p><b>Step 4.</b> When BotFather asks for a name, send a display name, for example:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">QueryMesh Research</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">QueryMesh Research</pre>
 <p><b>Step 5.</b> When it asks for a username, send a unique name that ends in bot:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">querymesh_YOURNAME_bot</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">querymesh_YOURNAME_bot</pre>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Placeholder</b></td><td style="background-color:#e0e0e0"><b>Replace with</b></td><td style="background-color:#e0e0e0"><b>Example</b></td></tr>
 <tr><td>YOURNAME</td><td>your name or initials, letters/digits/underscore only</td><td>querymesh_karthik_bot</td></tr>
 </table>
 <p><b>You should see:</b> &quot;Done! Congratulations on your new bot...&quot; and a line &quot;Use this token to access the HTTP API:&quot; followed by a token like 123456789:AAH...</p>
 <p><b>Step 6.</b> Copy the token.</p>
-<p><b>Step 7.</b> In VS Code open <span style="font-family:Roboto Mono">.env</span> and paste it after <span style="font-family:Roboto Mono">TELEGRAM_BOT_TOKEN=</span>:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">TELEGRAM_BOT_TOKEN=123456789:AAH_YOUR_TOKEN</pre>
+<p><b>Step 7.</b> In VS Code open <span style="font-family:'Roboto Mono'">.env</span> and paste it after <span style="font-family:'Roboto Mono'">TELEGRAM_BOT_TOKEN=</span>:</p>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">TELEGRAM_BOT_TOKEN=123456789:AAH_YOUR_TOKEN</pre>
 <p><b>Step 8.</b> Press Ctrl+S.</p>
-<p><b>Step 9.</b> Right-click the folder <span style="font-family:Roboto Mono">querymesh</span>.</p>
+<p><b>Step 9.</b> Right-click the folder <span style="font-family:'Roboto Mono'">querymesh</span>.</p>
 <p><b>Step 10.</b> Click <b>New File...</b>.</p>
-<p><b>Step 11.</b> Type <span style="font-family:Roboto Mono">ui_telegram.py</span> and press Enter.</p>
+<p><b>Step 11.</b> Type <span style="font-family:'Roboto Mono'">ui_telegram.py</span> and press Enter.</p>
 <p><b>Step 12.</b> Paste the grey box below.</p>
 <p><b>Step 13.</b> Press Ctrl+S.</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;Telegram bot. Send it a question; it edits its reply live while the agents work.&quot;&quot;&quot;
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;Telegram bot. Send it a question; it edits its reply live while the agents work.&quot;&quot;&quot;
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
@@ -174,29 +62,29 @@ if __name__ == &quot;__main__&quot;:
     main()</pre>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
-<tr><td><span style="font-family:Roboto Mono">from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters</span></td><td>python-telegram-bot: the bot application and the handlers that react to commands and messages [30]</td></tr>
-<tr><td><span style="font-family:Roboto Mono">async def start(update, context)</span></td><td>answers the /start command with a welcome text</td></tr>
-<tr><td><span style="font-family:Roboto Mono">async def answer(update, context)</span></td><td>runs for every normal text message</td></tr>
-<tr><td><span style="font-family:Roboto Mono">reply = await update.message.reply_text(&quot;Working...&quot;)</span></td><td>sends a first reply and keeps it, so we can edit it</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters</span></td><td>python-telegram-bot: the bot application and the handlers that react to commands and messages [30]</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">async def start(update, context)</span></td><td>answers the /start command with a welcome text</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">async def answer(update, context)</span></td><td>runs for every normal text message</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">reply = await update.message.reply_text(&quot;Working...&quot;)</span></td><td>sends a first reply and keeps it, so we can edit it</td></tr>
 <tr><td>`await reply.edit_text(f&quot;Working...<br>{progress}&quot;)`</td><td>edits the same message after each agent step: the &quot;streaming&quot; effect in Telegram</td></tr>
-<tr><td><span style="font-family:Roboto Mono">format_final(value)[:4000]</span></td><td>Telegram messages may have at most 4,096 characters</td></tr>
-<tr><td><span style="font-family:Roboto Mono">if not config.TELEGRAM_BOT_TOKEN: raise SystemExit(...)</span></td><td>a clear message instead of a confusing error when the token is missing</td></tr>
-<tr><td><span style="font-family:Roboto Mono">ApplicationBuilder().token(...).build()</span></td><td>creates the bot with your token</td></tr>
-<tr><td><span style="font-family:Roboto Mono">CommandHandler(&quot;start&quot;, start)</span></td><td>/start goes to start()</td></tr>
-<tr><td><span style="font-family:Roboto Mono">MessageHandler(filters.TEXT &amp; ~filters.COMMAND, answer)</span></td><td>any text that is not a command goes to answer()</td></tr>
-<tr><td><span style="font-family:Roboto Mono">app.run_polling()</span></td><td>ask Telegram&#x27;s servers for new messages again and again. No open port and no public address are needed</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">format_final(value)[:4000]</span></td><td>Telegram messages may have at most 4,096 characters</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">if not config.TELEGRAM_BOT_TOKEN: raise SystemExit(...)</span></td><td>a clear message instead of a confusing error when the token is missing</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">ApplicationBuilder().token(...).build()</span></td><td>creates the bot with your token</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">CommandHandler(&quot;start&quot;, start)</span></td><td>/start goes to start()</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">MessageHandler(filters.TEXT &amp; ~filters.COMMAND, answer)</span></td><td>any text that is not a command goes to answer()</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">app.run_polling()</span></td><td>ask Telegram&#x27;s servers for new messages again and again. No open port and no public address are needed</td></tr>
 </table>
 <p><b>Step 14.</b> Start the bot in a new tmux window:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">tmux new-window -t agents -n telegram &quot;cd ~/querymesh &amp;&amp; .venv/bin/python -m querymesh.ui_telegram; bash&quot;</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">tmux new-window -t agents -n telegram &quot;cd ~/querymesh &amp;&amp; .venv/bin/python -m querymesh.ui_telegram; bash&quot;</pre>
 <p><b>Step 15.</b> In Telegram, open your bot: search for querymesh_YOURNAME_bot (or tap the t.me link BotFather sent).</p>
 <p><b>Step 16.</b> Tap <b>Start</b>.</p>
 <p><b>You should see:</b> &quot;Hi! I am QueryMesh. Send me a question about arXiv research.&quot;</p>
 <p><b>Step 17.</b> Send a question, for example:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">What are recent methods to reduce hallucination in RAG?</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">What are recent methods to reduce hallucination in RAG?</pre>
 <p><b>You should see:</b> &quot;Working...&quot; that grows with - retriever ..., - grader ..., and is finally replaced by the answer with Sources.</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>If you see...</b></td><td style="background-color:#e0e0e0"><b>It means...</b></td><td style="background-color:#e0e0e0"><b>Do this next</b></td></tr>
-<tr><td>the bot does not answer at all</td><td>the telegram window crashed</td><td><span style="font-family:Roboto Mono">tmux attach -t agents</span>, window telegram, read the error</td></tr>
+<tr><td>the bot does not answer at all</td><td>the telegram window crashed</td><td><span style="font-family:'Roboto Mono'">tmux attach -t agents</span>, window telegram, read the error</td></tr>
 <tr><td>telegram.error.InvalidToken</td><td>the token in .env is wrong or has spaces</td><td>copy it again from BotFather (send /mybots &gt; your bot &gt; API Token)</td></tr>
 <tr><td>telegram.error.Conflict</td><td>the same bot runs twice (another window or computer)</td><td>stop the other copy; only one program may poll a bot</td></tr>
 <tr><td>Message is not modified</td><td>two identical edits in a row</td><td>harmless; the next step changes the text</td></tr>
@@ -206,20 +94,20 @@ if __name__ == &quot;__main__&quot;:
 <p><b>If not:</b> use the table above.</p>
 <h2>SECTION 6A.11 - Common mistake at this level</h2>
 <p><b>Mistake:</b> changing .env and expecting the running servers to notice. Every process (five agents, API, Gradio, Telegram) reads .env once, at start. The usual symptom: &quot;I added my Logfire token but see no spans&quot; or &quot;the API still uses local mode&quot;.</p>
-<p><b>How to spot it:</b> <span style="font-family:Roboto Mono">tmux attach -t agents</span> and look at when each window started; compare with when you saved .env.</p>
+<p><b>How to spot it:</b> <span style="font-family:'Roboto Mono'">tmux attach -t agents</span> and look at when each window started; compare with when you saved .env.</p>
 <p><b>Fix:</b> restart everything in one go:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">tmux kill-session -t agents</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">tmux kill-session -t agents</pre>
 <p>Then repeat Section 6A.3 Steps 1-5, Section 6A.7 Step 11, Section 6A.9 Step 11 and Section 6A.10 Step 14. Part 6B replaces these manual windows with docker compose, which restarts all services with one command.</p>
 <p><b>Second mistake:</b> opening ports 8090 or 7860 in the Hyperstack firewall &quot;to make it work&quot;. You do not need to: VS Code port forwarding is private and encrypted. Opened ports expose an API and a chat page to the whole internet.</p>
 <h2>PART 6A RESULT CHECK (all must be true before Part 6B)</h2>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Check</b></td><td style="background-color:#e0e0e0"><b>Command</b></td><td style="background-color:#e0e0e0"><b>Expected</b></td></tr>
-<tr><td>five agents healthy</td><td><span style="font-family:Roboto Mono">for p in 8101 8102 8103 8104 8105; do curl -s localhost:$p/healthz; echo; done</span></td><td>five {&quot;status&quot;:&quot;ok&quot;,...} lines</td></tr>
-<tr><td>Agent Card</td><td><span style="font-family:Roboto Mono">curl -s localhost:8105/.well-known/agent-card.json | jq -r .skills[0].id</span></td><td>scout</td></tr>
-<tr><td>remote mode</td><td><span style="font-family:Roboto Mono">grep ^WORKER_MODE .env</span></td><td>WORKER_MODE=remote</td></tr>
-<tr><td>JWT protection</td><td><span style="font-family:Roboto Mono">curl -s -o /dev/null -w &quot;%{http_code}&quot; -X POST localhost:8090/ask -H &quot;Content-Type: application/json&quot; -d &#x27;{&quot;question&quot;:&quot;abc&quot;}&#x27;</span></td><td>401</td></tr>
+<tr><td>five agents healthy</td><td><span style="font-family:'Roboto Mono'">for p in 8101 8102 8103 8104 8105; do curl -s localhost:<span style="font-family:'Roboto Mono'">$</span>p/healthz; echo; done</span></td><td>five {&quot;status&quot;:&quot;ok&quot;,...} lines</td></tr>
+<tr><td>Agent Card</td><td><span style="font-family:'Roboto Mono'">curl -s localhost:8105/.well-known/agent-card.json | jq -r .skills[0].id</span></td><td>scout</td></tr>
+<tr><td>remote mode</td><td><span style="font-family:'Roboto Mono'">grep ^WORKER_MODE .env</span></td><td>WORKER_MODE=remote</td></tr>
+<tr><td>JWT protection</td><td><span style="font-family:'Roboto Mono'">curl -s -o /dev/null -w &quot;%{http_code}&quot; -X POST localhost:8090/ask -H &quot;Content-Type: application/json&quot; -d &#x27;{&quot;question&quot;:&quot;abc&quot;}&#x27;</span></td><td>401</td></tr>
 <tr><td>cache hit</td><td>Section 6A.7 Step 17</td><td>true</td></tr>
-<tr><td>tests</td><td><span style="font-family:Roboto Mono">pytest -q</span></td><td>10 passed</td></tr>
+<tr><td>tests</td><td><span style="font-family:'Roboto Mono'">pytest -q</span></td><td>10 passed</td></tr>
 <tr><td>Logfire</td><td>Logfire Live view</td><td>spans from querymesh services</td></tr>
 <tr><td>Langfuse</td><td>Langfuse Tracing</td><td>ChatOpenAI traces with token counts</td></tr>
 <tr><td>web chat</td><td><a href="http://localhost:7860">http://localhost:7860</a> (port forwarded)</td><td>steps stream, then a cited answer</td></tr>

@@ -11,7 +11,7 @@
 <tr><td>Docker image</td><td>a frozen package: Linux + Python + your code + its libraries. Built once, runs the same everywhere</td></tr>
 <tr><td>container</td><td>a running copy of an image</td></tr>
 <tr><td>Dockerfile</td><td>the recipe that builds an image, step by step</td></tr>
-<tr><td>multi-stage build / target</td><td>one Dockerfile that can produce several images; <span style="font-family:Roboto Mono">--target app</span> stops at the stage called app</td></tr>
+<tr><td>multi-stage build / target</td><td>one Dockerfile that can produce several images; <span style="font-family:'Roboto Mono'">--target app</span> stops at the stage called app</td></tr>
 <tr><td>Docker Compose</td><td>starts many containers together from one YAML file</td></tr>
 <tr><td>registry</td><td>an online store for images. AWS ECR is your private one; FakeCloud has a working copy at localhost:4566</td></tr>
 <tr><td>Kubernetes (K8s)</td><td>software that runs containers on a group of machines, restarts them when they crash and spreads traffic</td></tr>
@@ -24,7 +24,7 @@
 <tr><td>kind</td><td>&quot;Kubernetes IN Docker&quot;: a real Kubernetes cluster whose machines are Docker containers on your VM. Free</td></tr>
 <tr><td>kubectl</td><td>the command-line remote control for any Kubernetes cluster</td></tr>
 <tr><td>Helm / chart</td><td>Helm is the package manager of Kubernetes; a chart is a folder of templates + values that becomes all the YAML</td></tr>
-<tr><td>EKS</td><td>Elastic Kubernetes Service: AWS runs the Kubernetes control plane for you (US$0.10 per hour) [36]</td></tr>
+<tr><td>EKS</td><td>Elastic Kubernetes Service: AWS runs the Kubernetes control plane for you (US<span style="font-family:'Roboto Mono'">$</span>0.10 per hour) [36]</td></tr>
 <tr><td>eksctl</td><td>the official command-line tool that creates an EKS cluster (VPC, subnets, machines, IAM) from one YAML file [37]</td></tr>
 <tr><td>node group</td><td>the EC2 machines (here 2 x t3.large) where your pods run</td></tr>
 <tr><td>ALB</td><td>Application Load Balancer: the public web entrance AWS creates for your Ingress [38]</td></tr>
@@ -44,14 +44,14 @@
 <tr><td>6B.15</td><td>delete everything so the bill stops</td><td>both columns</td></tr>
 </table>
 <p>How to use the two-column tables: do every row of ONE column, top to bottom. The white column is FakeCloud + kind (free practice, do it first). The light blue column is real AWS (costs money, do it only when the white column worked). &quot;same&quot; means: type exactly the command from the white column.</p>
-<p><b style="color:#bf1a1a">Watch out:</b> real AWS EKS costs about US$0.34 per hour while it runs (cost table in Section 6B.15), on top of the Hyperstack VM. Do the AWS column in one sitting and finish with Section 6B.15 the same day.</p>
+<p><b style="color:#bf1a1a">Watch out:</b> real AWS EKS costs about US<span style="font-family:'Roboto Mono'">$</span>0.34 per hour while it runs (cost table in Section 6B.15), on top of the Hyperstack VM. Do the AWS column in one sitting and finish with Section 6B.15 the same day.</p>
 <p>What was checked while writing this part: the Helm chart was linted and rendered with Helm v4.3.1 (18 Kubernetes objects, no errors) and the Compose file was validated with docker compose config. The Docker builds, kind and EKS steps were written from the official documentation and were NOT run by us; marked (verify) where a detail may differ on your screen.</p>
 <h2>SECTION 6B.1 - Create the Dockerfile and build the two images</h2>
 <p><b>WHERE:</b> VS Code connected to the VM (Section 2A.10), Explorer panel, folder ~/querymesh</p>
 <p><b>GOAL:</b> two images on the VM: querymesh:v1 (API, 5 agents, Gradio, Telegram) and querymesh-ingest:v1 (the same + Docling for PDFs).</p>
 <p><b>Step 1.</b> Create the file Dockerfile (no extension, capital D) in the project root with the procedure from Section 2B.3.</p>
 <p><b>Step 2.</b> Paste this content and press Ctrl+S:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2"># Two images from one recipe:
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2"># Two images from one recipe:
 #   docker build --target app    -t querymesh:v1 .          (API, 5 agents, Gradio, Telegram)
 #   docker build --target ingest -t querymesh-ingest:v1 .   (adds Docling for PDF parsing)
 FROM public.ecr.aws/docker/library/python:3.12-slim AS app
@@ -75,26 +75,26 @@ CMD [&quot;python&quot;, &quot;-m&quot;, &quot;querymesh.ingest&quot;, &quot;--m
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
 <tr><td>the three # lines</td><td>comments: how to build each of the two images</td></tr>
-<tr><td><span style="font-family:Roboto Mono">FROM public.ecr.aws/docker/library/python:3.12-slim AS app</span></td><td>start from a small Debian Linux with Python 3.12. We take it from the AWS ECR Public mirror of Docker Hub, which avoids Docker Hub&#x27;s anonymous download limit (HTTP 429). <span style="font-family:Roboto Mono">AS app</span> names this stage &quot;app&quot;</td></tr>
-<tr><td><span style="font-family:Roboto Mono">COPY --from=ghcr.io/astral-sh/uv:0.11.32 /uv /usr/local/bin/uv</span></td><td>copy only the uv program out of the official uv image into ours (fast installer, Section 2B.5)</td></tr>
-<tr><td><span style="font-family:Roboto Mono">ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1</span></td><td>print log lines immediately (so docker logs shows them) and do not write .pyc files</td></tr>
-<tr><td><span style="font-family:Roboto Mono">WORKDIR /app</span></td><td>every following command runs in the folder /app inside the image</td></tr>
-<tr><td><span style="font-family:Roboto Mono">COPY pyproject.toml ./</span></td><td>copy the list of libraries first</td></tr>
-<tr><td><span style="font-family:Roboto Mono">COPY querymesh ./querymesh</span></td><td>copy the Python package (only this folder: no .env, no data, no tests)</td></tr>
-<tr><td><span style="font-family:Roboto Mono">RUN uv pip install --system --no-cache .</span></td><td>install QueryMesh and all libraries from pyproject.toml into the image&#x27;s Python. <span style="font-family:Roboto Mono">--no-cache</span> keeps the image smaller</td></tr>
-<tr><td><span style="font-family:Roboto Mono">RUN useradd --create-home appuser</span> and <span style="font-family:Roboto Mono">USER appuser</span></td><td>create a normal user and run as that user, not as root (if someone breaks in, they are not root)</td></tr>
-<tr><td><span style="font-family:Roboto Mono">EXPOSE 8090 8101 ... 7860</span></td><td>documents which ports the programs listen on (API, five agents, Gradio)</td></tr>
-<tr><td><span style="font-family:Roboto Mono">CMD [&quot;uvicorn&quot;, &quot;querymesh.api:app&quot;, ...]</span></td><td>the default program: the API on port 8090. Agents and UIs override it with their own command</td></tr>
-<tr><td><span style="font-family:Roboto Mono">FROM app AS ingest</span></td><td>a second stage that starts from everything in &quot;app&quot;</td></tr>
-<tr><td><span style="font-family:Roboto Mono">USER root</span></td><td>installing needs root</td></tr>
-<tr><td><span style="font-family:Roboto Mono">RUN uv pip install ... torch torchvision --index-url <a href="https://download.pytorch.org/whl/cpu">https://download.pytorch.org/whl/cpu</a></span></td><td>install the CPU-only PyTorch (about 0.2 GB instead of several GB for the GPU build). Docling needs PyTorch for its layout model</td></tr>
-<tr><td><span style="font-family:Roboto Mono">&amp;&amp; uv pip install --system --no-cache &quot;.[ingest]&quot;</span></td><td>then install Docling (the &quot;ingest&quot; extra in pyproject.toml)</td></tr>
-<tr><td><span style="font-family:Roboto Mono">USER appuser</span></td><td>back to the normal user</td></tr>
-<tr><td><span style="font-family:Roboto Mono">CMD [&quot;python&quot;, &quot;-m&quot;, &quot;querymesh.ingest&quot;, &quot;--max-papers&quot;, &quot;5&quot;]</span></td><td>default program of this image: one ingestion run</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">FROM public.ecr.aws/docker/library/python:3.12-slim AS app</span></td><td>start from a small Debian Linux with Python 3.12. We take it from the AWS ECR Public mirror of Docker Hub, which avoids Docker Hub&#x27;s anonymous download limit (HTTP 429). <span style="font-family:'Roboto Mono'">AS app</span> names this stage &quot;app&quot;</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">COPY --from=ghcr.io/astral-sh/uv:0.11.32 /uv /usr/local/bin/uv</span></td><td>copy only the uv program out of the official uv image into ours (fast installer, Section 2B.5)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1</span></td><td>print log lines immediately (so docker logs shows them) and do not write .pyc files</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">WORKDIR /app</span></td><td>every following command runs in the folder /app inside the image</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">COPY pyproject.toml ./</span></td><td>copy the list of libraries first</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">COPY querymesh ./querymesh</span></td><td>copy the Python package (only this folder: no .env, no data, no tests)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">RUN uv pip install --system --no-cache .</span></td><td>install QueryMesh and all libraries from pyproject.toml into the image&#x27;s Python. <span style="font-family:'Roboto Mono'">--no-cache</span> keeps the image smaller</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">RUN useradd --create-home appuser</span> and <span style="font-family:'Roboto Mono'">USER appuser</span></td><td>create a normal user and run as that user, not as root (if someone breaks in, they are not root)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">EXPOSE 8090 8101 ... 7860</span></td><td>documents which ports the programs listen on (API, five agents, Gradio)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">CMD [&quot;uvicorn&quot;, &quot;querymesh.api:app&quot;, ...]</span></td><td>the default program: the API on port 8090. Agents and UIs override it with their own command</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">FROM app AS ingest</span></td><td>a second stage that starts from everything in &quot;app&quot;</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">USER root</span></td><td>installing needs root</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">RUN uv pip install ... torch torchvision --index-url <a href="https://download.pytorch.org/whl/cpu">https://download.pytorch.org/whl/cpu</a></span></td><td>install the CPU-only PyTorch (about 0.2 GB instead of several GB for the GPU build). Docling needs PyTorch for its layout model</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">&amp;&amp; uv pip install --system --no-cache &quot;.[ingest]&quot;</span></td><td>then install Docling (the &quot;ingest&quot; extra in pyproject.toml)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">USER appuser</span></td><td>back to the normal user</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">CMD [&quot;python&quot;, &quot;-m&quot;, &quot;querymesh.ingest&quot;, &quot;--max-papers&quot;, &quot;5&quot;]</span></td><td>default program of this image: one ingestion run</td></tr>
 </table>
 <p><b>Step 3.</b> Create the file .dockerignore in the project root (Section 2B.3 procedure).</p>
 <p><b>Step 4.</b> Paste this content and press Ctrl+S:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">.venv
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">.venv
 .env
 data
 .git
@@ -103,55 +103,55 @@ __pycache__
 .logfire</pre>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Line</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
-<tr><td><span style="font-family:Roboto Mono">.venv</span></td><td>your local virtual environment is not copied into the image (the image installs its own)</td></tr>
-<tr><td><span style="font-family:Roboto Mono">.env</span></td><td>your passwords never end up inside an image (images can be shared and pushed)</td></tr>
-<tr><td><span style="font-family:Roboto Mono">data</span></td><td>downloaded PDFs and the eval file stay out</td></tr>
-<tr><td><span style="font-family:Roboto Mono">.git</span>, <span style="font-family:Roboto Mono">__pycache__</span>, <span style="font-family:Roboto Mono">.pytest_cache</span>, <span style="font-family:Roboto Mono">.logfire</span></td><td>Git history, Python caches and Logfire&#x27;s local credentials stay out</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">.venv</span></td><td>your local virtual environment is not copied into the image (the image installs its own)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">.env</span></td><td>your passwords never end up inside an image (images can be shared and pushed)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">data</span></td><td>downloaded PDFs and the eval file stay out</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">.git</span>, <span style="font-family:'Roboto Mono'">__pycache__</span>, <span style="font-family:'Roboto Mono'">.pytest_cache</span>, <span style="font-family:'Roboto Mono'">.logfire</span></td><td>Git history, Python caches and Logfire&#x27;s local credentials stay out</td></tr>
 </table>
 <p><b>Step 5.</b> Open a terminal: Terminal &gt; New Terminal.</p>
 <p><b>Step 6.</b> Go to the project root:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">cd ~/querymesh</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">cd ~/querymesh</pre>
 <p><b>Step 7.</b> Build the app image (2 to 5 minutes the first time):</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">docker build --target app -t querymesh:v1 .</pre>
-<p><b>You should see:</b> lines like <span style="font-family:Roboto Mono">[app 6/8] RUN uv pip install --system --no-cache .</span> and at the end <span style="font-family:Roboto Mono">naming to docker.io/library/querymesh:v1</span>.</p>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">docker build --target app -t querymesh:v1 .</pre>
+<p><b>You should see:</b> lines like <span style="font-family:'Roboto Mono'">[app 6/8] RUN uv pip install --system --no-cache .</span> and at the end <span style="font-family:'Roboto Mono'">naming to docker.io/library/querymesh:v1</span>.</p>
 <p><b>Step 8.</b> Build the ingest image (5 to 10 minutes, it downloads PyTorch):</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">docker build --target ingest -t querymesh-ingest:v1 .</pre>
-<p><b>You should see:</b> <span style="font-family:Roboto Mono">naming to docker.io/library/querymesh-ingest:v1</span>.</p>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">docker build --target ingest -t querymesh-ingest:v1 .</pre>
+<p><b>You should see:</b> <span style="font-family:'Roboto Mono'">naming to docker.io/library/querymesh-ingest:v1</span>.</p>
 <p><b>Step 9.</b> List the images:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">docker images | grep querymesh</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">docker images | grep querymesh</pre>
 <p><b>You should see:</b> two lines, querymesh v1 (roughly 0.6 to 1 GB) and querymesh-ingest v1 (roughly 2 to 3 GB) (verify: sizes depend on library versions).</p>
 <p><b>Step 10.</b> Check that the code inside the image imports:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">docker run --rm querymesh:v1 python -c &quot;import querymesh.graph, querymesh.agents; print(&#x27;image ok&#x27;)&quot;</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">docker run --rm querymesh:v1 python -c &quot;import querymesh.graph, querymesh.agents; print(&#x27;image ok&#x27;)&quot;</pre>
 <p><b>You should see:</b> image ok</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Piece</b></td><td style="background-color:#e0e0e0"><b>What it does</b></td><td style="background-color:#e0e0e0"><b></b></td></tr>
-<tr><td><span style="font-family:Roboto Mono">--target app</span></td><td>stop at the stage named app</td><td></td></tr>
-<tr><td><span style="font-family:Roboto Mono">-t querymesh:v1</span></td><td>the image name (querymesh) and tag (v1)</td><td></td></tr>
-<tr><td><span style="font-family:Roboto Mono">.</span> (the final dot)</td><td>the build context = the current folder; COPY takes files from here</td><td></td></tr>
-<tr><td><span style="font-family:Roboto Mono">docker run --rm</span></td><td>start a container and delete it when it finishes</td><td></td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">--target app</span></td><td>stop at the stage named app</td><td></td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">-t querymesh:v1</span></td><td>the image name (querymesh) and tag (v1)</td><td></td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">.</span> (the final dot)</td><td>the build context = the current folder; COPY takes files from here</td><td></td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">docker run --rm</span></td><td>start a container and delete it when it finishes</td><td></td></tr>
 <tr><td>If you see...</td><td>It means...</td><td>Do this next</td></tr>
-<tr><td><span style="font-family:Roboto Mono">429 Too Many Requests</span></td><td>a registry download limit</td><td>wait 10 minutes and run the same build again</td></tr>
-<tr><td><span style="font-family:Roboto Mono">COPY failed: file not found</span></td><td>you are not in ~/querymesh</td><td>run <span style="font-family:Roboto Mono">cd ~/querymesh</span> and build again</td></tr>
-<tr><td><span style="font-family:Roboto Mono">No space left on device</span></td><td>old images fill the disk</td><td>run <span style="font-family:Roboto Mono">docker system prune -f</span> and build again</td></tr>
-<tr><td><span style="font-family:Roboto Mono">ModuleNotFoundError</span> in Step 10</td><td>a file is missing in querymesh/</td><td>compare <span style="font-family:Roboto Mono">ls querymesh</span> with the file list of Part 6A, add the missing file, rebuild</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">429 Too Many Requests</span></td><td>a registry download limit</td><td>wait 10 minutes and run the same build again</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">COPY failed: file not found</span></td><td>you are not in ~/querymesh</td><td>run <span style="font-family:'Roboto Mono'">cd ~/querymesh</span> and build again</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">No space left on device</span></td><td>old images fill the disk</td><td>run <span style="font-family:'Roboto Mono'">docker system prune -f</span> and build again</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">ModuleNotFoundError</span> in Step 10</td><td>a file is missing in querymesh/</td><td>compare <span style="font-family:'Roboto Mono'">ls querymesh</span> with the file list of Part 6A, add the missing file, rebuild</td></tr>
 </table>
 <p><b style="color:#bf1a1a">Watch out:</b> every time you change Python code, you must rebuild the image (Step 7) before Compose or Kubernetes see the change. Docker caches unchanged layers, so rebuilds take seconds when only your code changed.</p>
-<p><b style="color:#1a7333">CHECKPOINT:</b> <span style="font-family:Roboto Mono">docker images | grep querymesh</span> shows both images and Step 10 prints image ok.</p>
+<p><b style="color:#1a7333">CHECKPOINT:</b> <span style="font-family:'Roboto Mono'">docker images | grep querymesh</span> shows both images and Step 10 prints image ok.</p>
 <p><b>If not:</b> read the first red ERROR line of the build output; it names the failing line of the Dockerfile.</p>
 <h2>SECTION 6B.2 - Run the whole system with Docker Compose</h2>
 <p><b>WHERE:</b> VS Code Terminal, folder ~/querymesh</p>
 <p><b>GOAL:</b> five agents + API + Gradio (+ optional Telegram) start with one command, as containers.</p>
 <p><b>Step 1.</b> Stop every QueryMesh program you started by hand in Part 6A (they hold ports 8090, 8101-8105 and 7860):</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">pkill -f &quot;querymesh.agents|uvicorn querymesh.api|querymesh.ui_gradio|querymesh.ui_telegram&quot;</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">pkill -f &quot;querymesh.agents|uvicorn querymesh.api|querymesh.ui_gradio|querymesh.ui_telegram&quot;</pre>
 <p><b>Step 2.</b> Check that the ports are free:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">ss -ltnp | grep -E &quot;:(8090|810[1-5]|7860) &quot; || echo &quot;ports are free&quot;</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">ss -ltnp | grep -E &quot;:(8090|810[1-5]|7860) &quot; || echo &quot;ports are free&quot;</pre>
 <p><b>You should see:</b> ports are free</p>
 <p><b>Step 3.</b> Check that vLLM and OpenSearch (which stay outside Compose) are running:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">docker ps --format &#x27;{{.Names}}  {{.Status}}&#x27; | grep -E &quot;vllm|opensearch&quot;</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">docker ps --format &#x27;{{.Names}}  {{.Status}}&#x27; | grep -E &quot;vllm|opensearch&quot;</pre>
 <p><b>You should see:</b> two lines, vllm Up ... and opensearch Up ...</p>
 <p><b>Step 4.</b> Create the file docker-compose.yml in the project root (Section 2B.3 procedure).</p>
 <p><b>Step 5.</b> Paste this content and press Ctrl+S:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2"># The whole QueryMesh app on one machine. OpenSearch and vLLM already run on the VM itself,
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2"># The whole QueryMesh app on one machine. OpenSearch and vLLM already run on the VM itself,
 # so the containers reach them through host.docker.internal.
 x-app: &amp;app
   image: querymesh:v1
@@ -204,109 +204,109 @@ services:
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
 <tr><td>the two # lines</td><td>OpenSearch and vLLM are not in this file: they already run on the VM, and containers reach the VM through the name host.docker.internal</td></tr>
-<tr><td><span style="font-family:Roboto Mono">x-app: &amp;app</span></td><td>a reusable block of settings (YAML &quot;anchor&quot; named app). Compose ignores keys that start with x-</td></tr>
-<tr><td><span style="font-family:Roboto Mono">image: querymesh:v1</span></td><td>every service uses the image from Section 6B.1</td></tr>
-<tr><td><span style="font-family:Roboto Mono">env_file: .env</span></td><td>every container gets all lines of your .env as environment variables</td></tr>
-<tr><td><span style="font-family:Roboto Mono">restart: unless-stopped</span></td><td>Docker restarts a crashed container and starts it again after a VM reboot</td></tr>
-<tr><td><span style="font-family:Roboto Mono">extra_hosts: [&quot;host.docker.internal:host-gateway&quot;]</span></td><td>inside the containers, the name host.docker.internal points to the VM itself (172.17.0.1)</td></tr>
-<tr><td><span style="font-family:Roboto Mono">environment: &amp;app-env</span></td><td>settings that REPLACE the same lines of .env, saved as a second anchor</td></tr>
-<tr><td><span style="font-family:Roboto Mono">OPENSEARCH_URL: <a href="http://host.docker.internal:9200">http://host.docker.internal:9200</a></span></td><td>inside a container &quot;localhost&quot; is the container itself, so OpenSearch is reached via the VM&#x27;s Docker address</td></tr>
-<tr><td><span style="font-family:Roboto Mono">LLM_BASE_URL: <a href="http://host.docker.internal:8000/v1">http://host.docker.internal:8000/v1</a></span></td><td>the same for vLLM</td></tr>
-<tr><td><span style="font-family:Roboto Mono">WORKER_MODE: remote</span></td><td>the supervisor calls the agents over MCP/SSE (Part 6A), not in-process</td></tr>
-<tr><td><span style="font-family:Roboto Mono">AGENT_URLS: <a href="http://retriever:8101">http://retriever:8101</a>,...</span></td><td>inside Compose every service is reachable by its service name</td></tr>
-<tr><td><span style="font-family:Roboto Mono">retriever:</span> ... <span style="font-family:Roboto Mono">&lt;&lt;: *app</span></td><td>a service that copies all settings of the app block (the &lt;&lt; means &quot;merge in&quot;)</td></tr>
-<tr><td><span style="font-family:Roboto Mono">command: [&quot;python&quot;, &quot;-m&quot;, &quot;querymesh.agents&quot;, &quot;retriever&quot;]</span></td><td>replaces the image&#x27;s default command: start the retriever agent</td></tr>
-<tr><td><span style="font-family:Roboto Mono">environment: {&lt;&lt;: *app-env, PUBLIC_URL: &quot;<a href="http://retriever:8101">http://retriever:8101</a>&quot;}</span></td><td>the shared settings plus this agent&#x27;s own address, written into its Agent Card</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">x-app: &amp;app</span></td><td>a reusable block of settings (YAML &quot;anchor&quot; named app). Compose ignores keys that start with x-</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">image: querymesh:v1</span></td><td>every service uses the image from Section 6B.1</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">env_file: .env</span></td><td>every container gets all lines of your .env as environment variables</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">restart: unless-stopped</span></td><td>Docker restarts a crashed container and starts it again after a VM reboot</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">extra_hosts: [&quot;host.docker.internal:host-gateway&quot;]</span></td><td>inside the containers, the name host.docker.internal points to the VM itself (172.17.0.1)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">environment: &amp;app-env</span></td><td>settings that REPLACE the same lines of .env, saved as a second anchor</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">OPENSEARCH_URL: <a href="http://host.docker.internal:9200">http://host.docker.internal:9200</a></span></td><td>inside a container &quot;localhost&quot; is the container itself, so OpenSearch is reached via the VM&#x27;s Docker address</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">LLM_BASE_URL: <a href="http://host.docker.internal:8000/v1">http://host.docker.internal:8000/v1</a></span></td><td>the same for vLLM</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">WORKER_MODE: remote</span></td><td>the supervisor calls the agents over MCP/SSE (Part 6A), not in-process</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">AGENT_URLS: <a href="http://retriever:8101">http://retriever:8101</a>,...</span></td><td>inside Compose every service is reachable by its service name</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">retriever:</span> ... <span style="font-family:'Roboto Mono'">&lt;&lt;: *app</span></td><td>a service that copies all settings of the app block (the &lt;&lt; means &quot;merge in&quot;)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">command: [&quot;python&quot;, &quot;-m&quot;, &quot;querymesh.agents&quot;, &quot;retriever&quot;]</span></td><td>replaces the image&#x27;s default command: start the retriever agent</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">environment: {&lt;&lt;: *app-env, PUBLIC_URL: &quot;<a href="http://retriever:8101">http://retriever:8101</a>&quot;}</span></td><td>the shared settings plus this agent&#x27;s own address, written into its Agent Card</td></tr>
 <tr><td>grader, writer, critic, scout</td><td>the same pattern for the other four agents</td></tr>
-<tr><td><span style="font-family:Roboto Mono">api:</span> with <span style="font-family:Roboto Mono">ports: [&quot;8090:8090&quot;]</span></td><td>the API uses the image&#x27;s default command (uvicorn) and is published on the VM&#x27;s port 8090</td></tr>
-<tr><td><span style="font-family:Roboto Mono">depends_on: [retriever, ...]</span></td><td>start the agents before the API</td></tr>
-<tr><td><span style="font-family:Roboto Mono">gradio:</span> with <span style="font-family:Roboto Mono">API_URL: &quot;<a href="http://api:8090">http://api:8090</a>&quot;</span></td><td>the web UI talks to the API container by name; published on port 7860</td></tr>
-<tr><td><span style="font-family:Roboto Mono">telegram:</span> with <span style="font-family:Roboto Mono">profiles: [&quot;telegram&quot;]</span></td><td>the bot only starts when you ask for the telegram profile</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">api:</span> with <span style="font-family:'Roboto Mono'">ports: [&quot;8090:8090&quot;]</span></td><td>the API uses the image&#x27;s default command (uvicorn) and is published on the VM&#x27;s port 8090</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">depends_on: [retriever, ...]</span></td><td>start the agents before the API</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">gradio:</span> with <span style="font-family:'Roboto Mono'">API_URL: &quot;<a href="http://api:8090">http://api:8090</a>&quot;</span></td><td>the web UI talks to the API container by name; published on port 7860</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">telegram:</span> with <span style="font-family:'Roboto Mono'">profiles: [&quot;telegram&quot;]</span></td><td>the bot only starts when you ask for the telegram profile</td></tr>
 </table>
 <p><b>Step 6.</b> Check the file (this prints nothing when it is valid):</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">docker compose config --quiet &amp;&amp; echo &quot;compose file ok&quot;</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">docker compose config --quiet &amp;&amp; echo &quot;compose file ok&quot;</pre>
 <p><b>You should see:</b> compose file ok</p>
 <p><b>Step 7.</b> Start everything in the background:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">docker compose up -d</pre>
-<p><b>You should see:</b> lines like <span style="font-family:Roboto Mono">Container querymesh-retriever-1  Started</span> for 7 containers.</p>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">docker compose up -d</pre>
+<p><b>You should see:</b> lines like <span style="font-family:'Roboto Mono'">Container querymesh-retriever-1  Started</span> for 7 containers.</p>
 <p><b>Step 8.</b> Look at their state:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">docker compose ps</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">docker compose ps</pre>
 <p><b>You should see:</b> 7 lines (retriever, grader, writer, critic, scout, api, gradio), STATUS Up.</p>
 <p><b>Step 9.</b> Follow the API log for a few seconds (press Ctrl+C to stop following; the containers keep running):</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">docker compose logs -f api</pre>
-<p><b>You should see:</b> <span style="font-family:Roboto Mono">Uvicorn running on <a href="http://0.0.0.0:8090">http://0.0.0.0:8090</a></span>.</p>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">docker compose logs -f api</pre>
+<p><b>You should see:</b> <span style="font-family:'Roboto Mono'">Uvicorn running on <a href="http://0.0.0.0:8090">http://0.0.0.0:8090</a></span>.</p>
 <p><b>Step 10.</b> Read your API password into the terminal:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">API_PASSWORD=$(grep &#x27;^API_PASSWORD=&#x27; .env | cut -d= -f2)</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">API_PASSWORD=<span style="font-family:'Roboto Mono'">$</span>(grep &#x27;^API_PASSWORD=&#x27; .env | cut -d= -f2)</pre>
 <p><b>Step 11.</b> Log in and keep the token:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">TOKEN=$(curl -s -X POST localhost:8090/token -d &quot;username=admin&amp;password=$API_PASSWORD&quot; | jq -r .access_token) &amp;&amp; echo ${TOKEN:0:20}</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">TOKEN=<span style="font-family:'Roboto Mono'">$</span>(curl -s -X POST localhost:8090/token -d &quot;username=admin&amp;password=<span style="font-family:'Roboto Mono'">$</span>API_PASSWORD&quot; | jq -r .access_token) &amp;&amp; echo <span style="font-family:'Roboto Mono'">$</span>{TOKEN:0:20}</pre>
 <p><b>You should see:</b> the first 20 characters of the token, starting with eyJ.</p>
 <p><b>Step 12.</b> Ask a question through the containers:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">curl -s -X POST localhost:8090/ask -H &quot;Authorization: Bearer $TOKEN&quot; -H &quot;Content-Type: application/json&quot; -d &#x27;{&quot;question&quot;: &quot;How does reciprocal rank fusion combine keyword and vector search?&quot;}&#x27; | jq</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">curl -s -X POST localhost:8090/ask -H &quot;Authorization: Bearer <span style="font-family:'Roboto Mono'">$</span>TOKEN&quot; -H &quot;Content-Type: application/json&quot; -d &#x27;{&quot;question&quot;: &quot;How does reciprocal rank fusion combine keyword and vector search?&quot;}&#x27; | jq</pre>
 <p><b>You should see:</b> JSON with &quot;answer&quot;, &quot;citations&quot;, &quot;grounded&quot;: true and &quot;cached&quot;: false (20 to 60 seconds). Run Step 12 again: &quot;cached&quot;: true comes back in under a second.</p>
 <p><b>Step 13.</b> Open the web UI: in VS Code click the PORTS tab, click Forward a Port, type 7860, press Enter, then click the globe icon next to port 7860 (Section 2A.12).</p>
 <p><b>You should see:</b> the QueryMesh chat page in your laptop&#x27;s browser.</p>
 <p><b>Step 14.</b> (Optional, only if you created the Telegram bot in Section 6A.10) start the bot container:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">docker compose --profile telegram up -d telegram</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">docker compose --profile telegram up -d telegram</pre>
 <p><b>Step 15.</b> When you are done testing, stop and remove the containers (Kubernetes takes over next):</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">docker compose down</pre>
-<p><b>You should see:</b> <span style="font-family:Roboto Mono">Container ... Removed</span> lines.</p>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">docker compose down</pre>
+<p><b>You should see:</b> <span style="font-family:'Roboto Mono'">Container ... Removed</span> lines.</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>If you see...</b></td><td style="background-color:#e0e0e0"><b>It means...</b></td><td style="background-color:#e0e0e0"><b>Do this next</b></td></tr>
-<tr><td><span style="font-family:Roboto Mono">Bind for 0.0.0.0:8090 failed: port is already allocated</span></td><td>a Part 6A program still runs</td><td>repeat Step 1, then Step 7</td></tr>
-<tr><td>api log: <span style="font-family:Roboto Mono">Connection refused</span> to host.docker.internal:9200</td><td>OpenSearch is not running or bound elsewhere</td><td>run <span style="font-family:Roboto Mono">bash scripts/start_opensearch.sh</span> and wait 30 seconds</td></tr>
-<tr><td>/ask returns 500 and the retriever log shows <span style="font-family:Roboto Mono">index_not_found_exception</span></td><td>the index is empty in this OpenSearch</td><td>run an ingestion first (Section 4.5)</td></tr>
-<tr><td>/ask answers with an LLM error</td><td>vLLM is down or LLM_API_KEY differs</td><td><span style="font-family:Roboto Mono">docker logs vllm --tail 20</span>; compare LLM_API_KEY in .env with the key vLLM was started with</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">Bind for 0.0.0.0:8090 failed: port is already allocated</span></td><td>a Part 6A program still runs</td><td>repeat Step 1, then Step 7</td></tr>
+<tr><td>api log: <span style="font-family:'Roboto Mono'">Connection refused</span> to host.docker.internal:9200</td><td>OpenSearch is not running or bound elsewhere</td><td>run <span style="font-family:'Roboto Mono'">bash scripts/start_opensearch.sh</span> and wait 30 seconds</td></tr>
+<tr><td>/ask returns 500 and the retriever log shows <span style="font-family:'Roboto Mono'">index_not_found_exception</span></td><td>the index is empty in this OpenSearch</td><td>run an ingestion first (Section 4.5)</td></tr>
+<tr><td>/ask answers with an LLM error</td><td>vLLM is down or LLM_API_KEY differs</td><td><span style="font-family:'Roboto Mono'">docker logs vllm --tail 20</span>; compare LLM_API_KEY in .env with the key vLLM was started with</td></tr>
 </table>
-<p><b style="color:#bf1a1a">Watch out:</b> Compose reads .env at start. After you change .env, run <span style="font-family:Roboto Mono">docker compose up -d</span> again so the containers get the new values.</p>
+<p><b style="color:#bf1a1a">Watch out:</b> Compose reads .env at start. After you change .env, run <span style="font-family:'Roboto Mono'">docker compose up -d</span> again so the containers get the new values.</p>
 <p><b style="color:#1a7333">CHECKPOINT:</b> Step 12 returns a grounded answer with citations from the containers, and the web UI works on port 7860.</p>
-<p><b>If not:</b> <span style="font-family:Roboto Mono">docker compose logs --tail 50 SERVICE</span> (for example retriever) shows the error of that one container.</p>
+<p><b>If not:</b> <span style="font-family:'Roboto Mono'">docker compose logs --tail 50 SERVICE</span> (for example retriever) shows the error of that one container.</p>
 <h2>SECTION 6B.3 - Install kind, kubectl and helm on the VM</h2>
 <p><b>WHERE:</b> VS Code Terminal on the VM</p>
 <p><b>GOAL:</b> the three Kubernetes tools are installed; eksctl too, for the AWS column.</p>
 <p><b>Step 1.</b> Download kind v0.33.0 [32]:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.33.0/kind-linux-amd64</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.33.0/kind-linux-amd64</pre>
 <p><b>Step 2.</b> Make it executable:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">chmod +x ./kind</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">chmod +x ./kind</pre>
 <p><b>Step 3.</b> Move it to a folder on your PATH:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">sudo mv ./kind /usr/local/bin/kind</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">sudo mv ./kind /usr/local/bin/kind</pre>
 <p><b>Step 4.</b> Check:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">kind version</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">kind version</pre>
 <p><b>You should see:</b> kind v0.33.0 go1... linux/amd64</p>
 <p><b>Step 5.</b> Download kubectl v1.37.1 [33]:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">curl -LO &quot;https://dl.k8s.io/release/v1.37.1/bin/linux/amd64/kubectl&quot;</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">curl -LO &quot;https://dl.k8s.io/release/v1.37.1/bin/linux/amd64/kubectl&quot;</pre>
 <p><b>Step 6.</b> Install it:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl &amp;&amp; rm kubectl</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl &amp;&amp; rm kubectl</pre>
 <p><b>Step 7.</b> Check:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">kubectl version --client</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">kubectl version --client</pre>
 <p><b>You should see:</b> Client Version: v1.37.1</p>
 <p><b>Step 8.</b> Download the official Helm 4 installer [34]:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-4</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-4</pre>
 <p><b>Step 9.</b> Make it executable:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">chmod 700 get_helm.sh</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">chmod 700 get_helm.sh</pre>
 <p><b>Step 10.</b> Run it:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">./get_helm.sh &amp;&amp; rm get_helm.sh</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">./get_helm.sh &amp;&amp; rm get_helm.sh</pre>
 <p><b>Step 11.</b> Check:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">helm version --short</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">helm version --short</pre>
 <p><b>You should see:</b> v4.3.1 (or a newer v4.x)</p>
 <p><b>Step 12.</b> (Needed only for the light blue AWS column) download eksctl [37]:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">curl -sLO &quot;https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz&quot;</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">curl -sLO &quot;https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz&quot;</pre>
 <p><b>Step 13.</b> Unpack it into /tmp:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">tar -xzf eksctl_Linux_amd64.tar.gz -C /tmp &amp;&amp; rm eksctl_Linux_amd64.tar.gz</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">tar -xzf eksctl_Linux_amd64.tar.gz -C /tmp &amp;&amp; rm eksctl_Linux_amd64.tar.gz</pre>
 <p><b>Step 14.</b> Install it:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">sudo install -m 0755 /tmp/eksctl /usr/local/bin &amp;&amp; rm /tmp/eksctl</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">sudo install -m 0755 /tmp/eksctl /usr/local/bin &amp;&amp; rm /tmp/eksctl</pre>
 <p><b>Step 15.</b> Check:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">eksctl version</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">eksctl version</pre>
 <p><b>You should see:</b> 0.231.0 (or newer)</p>
 <p><b style="color:#1a7333">CHECKPOINT:</b> kind version, kubectl version --client, helm version --short (and eksctl version) all print a version.</p>
-<p><b>If not:</b> <span style="font-family:Roboto Mono">command not found</span> means the file is not in /usr/local/bin: repeat the install step of that tool.</p>
+<p><b>If not:</b> <span style="font-family:'Roboto Mono'">command not found</span> means the file is not in /usr/local/bin: repeat the install step of that tool.</p>
 <h2>SECTION 6B.4 - Create the local Kubernetes cluster with kind</h2>
 <p><b>WHERE:</b> VS Code, project ~/querymesh</p>
 <p><b>GOAL:</b> a working 2-machine Kubernetes cluster called querymesh, running as Docker containers on the VM.</p>
 <p><b>Step 1.</b> Create the folders for the deployment files:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">mkdir -p ~/querymesh/deploy/k8s ~/querymesh/deploy/aws ~/querymesh/deploy/helm/querymesh/templates</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">mkdir -p ~/querymesh/deploy/k8s ~/querymesh/deploy/aws ~/querymesh/deploy/helm/querymesh/templates</pre>
 <p><b>Step 2.</b> Create the file deploy/k8s/kind-config.yaml (Section 2B.3 procedure).</p>
 <p><b>Step 3.</b> Paste this content and press Ctrl+S:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2"># A local Kubernetes cluster made of Docker containers: 1 control plane + 1 worker.
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2"># A local Kubernetes cluster made of Docker containers: 1 control plane + 1 worker.
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 name: querymesh
@@ -315,54 +315,54 @@ nodes:
   - role: worker</pre>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Line</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
-<tr><td><span style="font-family:Roboto Mono">kind: Cluster</span> and <span style="font-family:Roboto Mono">apiVersion: kind.x-k8s.io/v1alpha4</span></td><td>this file describes a kind cluster (format version v1alpha4)</td></tr>
-<tr><td><span style="font-family:Roboto Mono">name: querymesh</span></td><td>the cluster name; kubectl calls it kind-querymesh</td></tr>
-<tr><td><span style="font-family:Roboto Mono">- role: control-plane</span></td><td>one container that runs the Kubernetes &quot;brain&quot; (API server, scheduler)</td></tr>
-<tr><td><span style="font-family:Roboto Mono">- role: worker</span></td><td>one container where your pods run</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">kind: Cluster</span> and <span style="font-family:'Roboto Mono'">apiVersion: kind.x-k8s.io/v1alpha4</span></td><td>this file describes a kind cluster (format version v1alpha4)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">name: querymesh</span></td><td>the cluster name; kubectl calls it kind-querymesh</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">- role: control-plane</span></td><td>one container that runs the Kubernetes &quot;brain&quot; (API server, scheduler)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">- role: worker</span></td><td>one container where your pods run</td></tr>
 </table>
 <p><b>Step 4.</b> Create the cluster (1 to 3 minutes):</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">kind create cluster --config deploy/k8s/kind-config.yaml</pre>
-<p><b>You should see:</b> checkmarks for &quot;Ensuring node image&quot;, &quot;Preparing nodes&quot;, &quot;Starting control-plane&quot;, &quot;Joining worker nodes&quot;, then <span style="font-family:Roboto Mono">Set kubectl context to &quot;kind-querymesh&quot;</span>.</p>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">kind create cluster --config deploy/k8s/kind-config.yaml</pre>
+<p><b>You should see:</b> checkmarks for &quot;Ensuring node image&quot;, &quot;Preparing nodes&quot;, &quot;Starting control-plane&quot;, &quot;Joining worker nodes&quot;, then <span style="font-family:'Roboto Mono'">Set kubectl context to &quot;kind-querymesh&quot;</span>.</p>
 <p><b>Step 5.</b> Ask the cluster for its machines:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">kubectl get nodes</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">kubectl get nodes</pre>
 <p><b>You should see:</b> querymesh-control-plane and querymesh-worker, STATUS Ready.</p>
 <p><b>Step 6.</b> Check which Docker address the cluster uses to reach the VM (vLLM is reached there):</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">ip -4 addr show docker0 | grep inet</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">ip -4 addr show docker0 | grep inet</pre>
 <p><b>You should see:</b> inet 172.17.0.1/16 ... This is the address used in values-kind.yaml (Section 6B.11). If you see a different address, write it down: you will use it in Section 6B.12.</p>
-<p><b style="color:#bf1a1a">Watch out:</b> kind stores its kubectl settings in ~/.kube/config. Later, eksctl adds the EKS cluster to the same file. <span style="font-family:Roboto Mono">kubectl config current-context</span> always tells you which cluster your next kubectl command will touch: kind-querymesh (local) or an EKS name (real money).</p>
-<p><b style="color:#1a7333">CHECKPOINT:</b> <span style="font-family:Roboto Mono">kubectl get nodes</span> shows 2 nodes Ready.</p>
-<p><b>If not:</b> <span style="font-family:Roboto Mono">docker ps</span> must list querymesh-control-plane and querymesh-worker. If the create failed, run <span style="font-family:Roboto Mono">kind delete cluster --name querymesh</span> and repeat Step 4.</p>
+<p><b style="color:#bf1a1a">Watch out:</b> kind stores its kubectl settings in ~/.kube/config. Later, eksctl adds the EKS cluster to the same file. <span style="font-family:'Roboto Mono'">kubectl config current-context</span> always tells you which cluster your next kubectl command will touch: kind-querymesh (local) or an EKS name (real money).</p>
+<p><b style="color:#1a7333">CHECKPOINT:</b> <span style="font-family:'Roboto Mono'">kubectl get nodes</span> shows 2 nodes Ready.</p>
+<p><b>If not:</b> <span style="font-family:'Roboto Mono'">docker ps</span> must list querymesh-control-plane and querymesh-worker. If the create failed, run <span style="font-family:'Roboto Mono'">kind delete cluster --name querymesh</span> and repeat Step 4.</p>
 <h2>SECTION 6B.5 - Create the image registry and push the images</h2>
 <p><b>WHERE:</b> VS Code Terminal, folder ~/querymesh. FakeCloud running (Section 2B.12).</p>
 <p><b>GOAL:</b> both images are stored in a registry: FakeCloud ECR (white) or real AWS ECR (light blue).</p>
 <p><b>Step 1.</b> Check that FakeCloud is healthy (white column) or that your AWS keys work (light blue column):</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:4566/_fakecloud/health | head -c 80; echo; aws sts get-caller-identity --query Account --output text</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:4566/_fakecloud/health | head -c 80; echo; aws sts get-caller-identity --query Account --output text</pre>
 <p><b>Step 2.</b> Do the rows of your column, top to bottom, in ONE terminal (the export lines live only in this terminal):</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Step</b></td><td style="background-color:#e0e0e0"><b>FakeCloud (free practice)</b></td><td style="background-color:#9fc5e8"><b>Real AWS (same step)</b></td></tr>
-<tr><td>1 Choose the target</td><td><span style="font-family:Roboto Mono">source scripts/use_fakecloud.sh</span></td><td style="background-color:#cfe2f3"><span style="font-family:Roboto Mono">source scripts/use_aws.sh</span></td></tr>
-<tr><td>2 Remember the account</td><td><span style="font-family:Roboto Mono">export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text) &amp;&amp; echo $ACCOUNT_ID</span></td><td style="background-color:#cfe2f3">same (prints your real 12-digit account ID)</td></tr>
-<tr><td>3 Registry address</td><td><span style="font-family:Roboto Mono">export REGISTRY=localhost:4566</span></td><td style="background-color:#cfe2f3"><span style="font-family:Roboto Mono">export REGISTRY=$ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com</span></td></tr>
-<tr><td>4 Create the app repository</td><td><span style="font-family:Roboto Mono">aws ecr create-repository --repository-name querymesh --image-scanning-configuration scanOnPush=true</span></td><td style="background-color:#cfe2f3">same</td></tr>
-<tr><td>5 Create the ingest repository</td><td><span style="font-family:Roboto Mono">aws ecr create-repository --repository-name querymesh-ingest --image-scanning-configuration scanOnPush=true</span></td><td style="background-color:#cfe2f3">same</td></tr>
-<tr><td>6 Log Docker in</td><td><span style="font-family:Roboto Mono">aws ecr get-login-password | docker login --username AWS --password-stdin $REGISTRY</span></td><td style="background-color:#cfe2f3">same</td></tr>
-<tr><td>7 Second name for the app image</td><td><span style="font-family:Roboto Mono">docker tag querymesh:v1 $REGISTRY/querymesh:v1</span></td><td style="background-color:#cfe2f3">same</td></tr>
-<tr><td>8 Second name for the ingest image</td><td><span style="font-family:Roboto Mono">docker tag querymesh-ingest:v1 $REGISTRY/querymesh-ingest:v1</span></td><td style="background-color:#cfe2f3">same</td></tr>
-<tr><td>9 Push the app image</td><td><span style="font-family:Roboto Mono">docker push $REGISTRY/querymesh:v1</span></td><td style="background-color:#cfe2f3">same (uploads about 0.6-1 GB)</td></tr>
-<tr><td>10 Push the ingest image</td><td><span style="font-family:Roboto Mono">docker push $REGISTRY/querymesh-ingest:v1</span></td><td style="background-color:#cfe2f3">same (uploads about 2-3 GB, a few minutes)</td></tr>
-<tr><td>11 Verify</td><td><span style="font-family:Roboto Mono">aws ecr describe-images --repository-name querymesh --query &#x27;imageDetails[].imageTags&#x27;</span></td><td style="background-color:#cfe2f3">same; or console: ECR &gt; Private registry &gt; Repositories &gt; querymesh</td></tr>
-<tr><td>You should see</td><td><span style="font-family:Roboto Mono">Login Succeeded</span> at row 6, <span style="font-family:Roboto Mono">v1: digest: sha256:...</span> at rows 9-10, <span style="font-family:Roboto Mono">[[&quot;v1&quot;]]</span> at row 11</td><td style="background-color:#cfe2f3">the same, and both repositories in the ECR console</td></tr>
-<tr><td>12 Load the images into kind (the local cluster pulls from the VM&#x27;s Docker, not from a registry)</td><td><span style="font-family:Roboto Mono">kind load docker-image querymesh:v1 --name querymesh</span> then <span style="font-family:Roboto Mono">kind load docker-image querymesh-ingest:v1 --name querymesh</span></td><td style="background-color:#cfe2f3">not applicable: EKS machines pull from ECR by themselves</td></tr>
+<tr><td>1 Choose the target</td><td><span style="font-family:'Roboto Mono'">source scripts/use_fakecloud.sh</span></td><td style="background-color:#cfe2f3"><span style="font-family:'Roboto Mono'">source scripts/use_aws.sh</span></td></tr>
+<tr><td>2 Remember the account</td><td><span style="font-family:'Roboto Mono'">export ACCOUNT_ID=<span style="font-family:'Roboto Mono'">$</span>(aws sts get-caller-identity --query Account --output text) &amp;&amp; echo <span style="font-family:'Roboto Mono'">$</span>ACCOUNT_ID</span></td><td style="background-color:#cfe2f3">same (prints your real 12-digit account ID)</td></tr>
+<tr><td>3 Registry address</td><td><span style="font-family:'Roboto Mono'">export REGISTRY=localhost:4566</span></td><td style="background-color:#cfe2f3"><span style="font-family:'Roboto Mono'">export REGISTRY=<span style="font-family:'Roboto Mono'">$</span>ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com</span></td></tr>
+<tr><td>4 Create the app repository</td><td><span style="font-family:'Roboto Mono'">aws ecr create-repository --repository-name querymesh --image-scanning-configuration scanOnPush=true</span></td><td style="background-color:#cfe2f3">same</td></tr>
+<tr><td>5 Create the ingest repository</td><td><span style="font-family:'Roboto Mono'">aws ecr create-repository --repository-name querymesh-ingest --image-scanning-configuration scanOnPush=true</span></td><td style="background-color:#cfe2f3">same</td></tr>
+<tr><td>6 Log Docker in</td><td><span style="font-family:'Roboto Mono'">aws ecr get-login-password | docker login --username AWS --password-stdin <span style="font-family:'Roboto Mono'">$</span>REGISTRY</span></td><td style="background-color:#cfe2f3">same</td></tr>
+<tr><td>7 Second name for the app image</td><td><span style="font-family:'Roboto Mono'">docker tag querymesh:v1 <span style="font-family:'Roboto Mono'">$</span>REGISTRY/querymesh:v1</span></td><td style="background-color:#cfe2f3">same</td></tr>
+<tr><td>8 Second name for the ingest image</td><td><span style="font-family:'Roboto Mono'">docker tag querymesh-ingest:v1 <span style="font-family:'Roboto Mono'">$</span>REGISTRY/querymesh-ingest:v1</span></td><td style="background-color:#cfe2f3">same</td></tr>
+<tr><td>9 Push the app image</td><td><span style="font-family:'Roboto Mono'">docker push <span style="font-family:'Roboto Mono'">$</span>REGISTRY/querymesh:v1</span></td><td style="background-color:#cfe2f3">same (uploads about 0.6-1 GB)</td></tr>
+<tr><td>10 Push the ingest image</td><td><span style="font-family:'Roboto Mono'">docker push <span style="font-family:'Roboto Mono'">$</span>REGISTRY/querymesh-ingest:v1</span></td><td style="background-color:#cfe2f3">same (uploads about 2-3 GB, a few minutes)</td></tr>
+<tr><td>11 Verify</td><td><span style="font-family:'Roboto Mono'">aws ecr describe-images --repository-name querymesh --query &#x27;imageDetails[].imageTags&#x27;</span></td><td style="background-color:#cfe2f3">same; or console: ECR &gt; Private registry &gt; Repositories &gt; querymesh</td></tr>
+<tr><td>You should see</td><td><span style="font-family:'Roboto Mono'">Login Succeeded</span> at row 6, <span style="font-family:'Roboto Mono'">v1: digest: sha256:...</span> at rows 9-10, <span style="font-family:'Roboto Mono'">[[&quot;v1&quot;]]</span> at row 11</td><td style="background-color:#cfe2f3">the same, and both repositories in the ECR console</td></tr>
+<tr><td>12 Load the images into kind (the local cluster pulls from the VM&#x27;s Docker, not from a registry)</td><td><span style="font-family:'Roboto Mono'">kind load docker-image querymesh:v1 --name querymesh</span> then <span style="font-family:'Roboto Mono'">kind load docker-image querymesh-ingest:v1 --name querymesh</span></td><td style="background-color:#cfe2f3">not applicable: EKS machines pull from ECR by themselves</td></tr>
 <tr><td>Piece</td><td>What it does</td><td style="background-color:#cfe2f3"></td></tr>
-<tr><td><span style="font-family:Roboto Mono">get-login-password</span> piped into <span style="font-family:Roboto Mono">docker login --password-stdin</span></td><td>ECR gives a 12-hour password; the pipe avoids typing it or saving it in your history</td><td style="background-color:#cfe2f3"></td></tr>
-<tr><td><span style="font-family:Roboto Mono">docker tag LOCAL REGISTRY/REPO:TAG</span></td><td>a second name for the same image that says where to push it</td><td style="background-color:#cfe2f3"></td></tr>
-<tr><td><span style="font-family:Roboto Mono">scanOnPush=true</span></td><td>AWS scans each pushed image for known security holes (FakeCloud returns empty findings)</td><td style="background-color:#cfe2f3"></td></tr>
-<tr><td><span style="font-family:Roboto Mono">kind load docker-image</span></td><td>copies an image from the VM&#x27;s Docker into the kind machines, so pods can start it without any registry</td><td style="background-color:#cfe2f3"></td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">get-login-password</span> piped into <span style="font-family:'Roboto Mono'">docker login --password-stdin</span></td><td>ECR gives a 12-hour password; the pipe avoids typing it or saving it in your history</td><td style="background-color:#cfe2f3"></td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">docker tag LOCAL REGISTRY/REPO:TAG</span></td><td>a second name for the same image that says where to push it</td><td style="background-color:#cfe2f3"></td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">scanOnPush=true</span></td><td>AWS scans each pushed image for known security holes (FakeCloud returns empty findings)</td><td style="background-color:#cfe2f3"></td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">kind load docker-image</span></td><td>copies an image from the VM&#x27;s Docker into the kind machines, so pods can start it without any registry</td><td style="background-color:#cfe2f3"></td></tr>
 </table>
-<p><b style="color:#bf1a1a">Watch out:</b> if you open a new terminal, rows 1-3 are gone. Run them again before any later row that uses $ACCOUNT_ID or $REGISTRY.</p>
-<p><b style="color:#bf1a1a">Watch out:</b> before every light blue row, <span style="font-family:Roboto Mono">echo $AWS_ENDPOINT_URL</span> must print an empty line. If it prints <a href="http://localhost:4566">http://localhost:4566</a> you are still talking to FakeCloud.</p>
+<p><b style="color:#bf1a1a">Watch out:</b> if you open a new terminal, rows 1-3 are gone. Run them again before any later row that uses <span style="font-family:'Roboto Mono'">$</span>ACCOUNT_ID or <span style="font-family:'Roboto Mono'">$</span>REGISTRY.</p>
+<p><b style="color:#bf1a1a">Watch out:</b> before every light blue row, <span style="font-family:'Roboto Mono'">echo <span style="font-family:'Roboto Mono'">$</span>AWS_ENDPOINT_URL</span> must print an empty line. If it prints <a href="http://localhost:4566">http://localhost:4566</a> you are still talking to FakeCloud.</p>
 <p><b style="color:#1a7333">CHECKPOINT:</b> row 11 lists the tag v1 in your column (and, white column, row 12 finished without error).</p>
-<p><b>If not:</b> <span style="font-family:Roboto Mono">no basic auth credentials</span> at a push = row 6 was done in another terminal or more than 12 hours ago: repeat row 6.</p>
+<p><b>If not:</b> <span style="font-family:'Roboto Mono'">no basic auth credentials</span> at a push = row 6 was done in another terminal or more than 12 hours ago: repeat row 6.</p>
 <h2>SECTION 6B.6 - Store the secrets in Secrets Manager</h2>
 <p><b>WHERE:</b> VS Code Terminal, folder ~/querymesh, same terminal as Section 6B.5</p>
 <p><b>GOAL:</b> one JSON secret querymesh/app holds every password and key the pods need. Nothing secret goes into Git, the chart or the images.</p>
@@ -379,43 +379,43 @@ nodes:
 <tr><td>TELEGRAM_BOT_TOKEN</td><td>only if you use the bot</td></tr>
 </table>
 <p><b>Step 1.</b> Check the target of this terminal:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">echo &quot;${AWS_ENDPOINT_URL:-REAL AWS}&quot;</pre>
-<p><b>You should see:</b> <a href="http://localhost:4566">http://localhost:4566</a> in the white column, REAL AWS in the light blue column. If it is wrong, run <span style="font-family:Roboto Mono">source scripts/use_fakecloud.sh</span> or <span style="font-family:Roboto Mono">source scripts/use_aws.sh</span>.</p>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">echo &quot;<span style="font-family:'Roboto Mono'">$</span>{AWS_ENDPOINT_URL:-REAL AWS}&quot;</pre>
+<p><b>You should see:</b> <a href="http://localhost:4566">http://localhost:4566</a> in the white column, REAL AWS in the light blue column. If it is wrong, run <span style="font-family:'Roboto Mono'">source scripts/use_fakecloud.sh</span> or <span style="font-family:'Roboto Mono'">source scripts/use_aws.sh</span>.</p>
 <p><b>Step 2.</b> Copy only the secret lines that have a value into a temporary file (same in both columns):</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">grep -E &#x27;^(JINA_API_KEY|LLM_API_KEY|REDIS_URL|JWT_SECRET|API_PASSWORD|LOGFIRE_TOKEN|LANGFUSE_PUBLIC_KEY|LANGFUSE_SECRET_KEY|LANGFUSE_BASE_URL|TELEGRAM_BOT_TOKEN)=.&#x27; .env &gt; /tmp/querymesh-secret.env</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">grep -E &#x27;^(JINA_API_KEY|LLM_API_KEY|REDIS_URL|JWT_SECRET|API_PASSWORD|LOGFIRE_TOKEN|LANGFUSE_PUBLIC_KEY|LANGFUSE_SECRET_KEY|LANGFUSE_BASE_URL|TELEGRAM_BOT_TOKEN)=.&#x27; .env &gt; /tmp/querymesh-secret.env</pre>
 <p><b>Step 3.</b> Check which keys were taken (the values are not printed):</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">cut -d= -f1 /tmp/querymesh-secret.env</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">cut -d= -f1 /tmp/querymesh-secret.env</pre>
 <p><b>You should see:</b> at least JINA_API_KEY, LLM_API_KEY, REDIS_URL, JWT_SECRET, API_PASSWORD (one per line).</p>
 <p><b>Step 4.</b> Turn the lines into one JSON object:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">jq -R -s &#x27;split(&quot;\n&quot;) | map(select(length &gt; 0) | capture(&quot;^(?&lt;key&gt;[^=]+)=(?&lt;value&gt;.*)$&quot;)) | from_entries&#x27; /tmp/querymesh-secret.env &gt; /tmp/querymesh-secret.json</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">jq -R -s &#x27;split(&quot;\n&quot;) | map(select(length &gt; 0) | capture(&quot;^(?&lt;key&gt;[^=]+)=(?&lt;value&gt;.*)<span style="font-family:'Roboto Mono'">$</span>&quot;)) | from_entries&#x27; /tmp/querymesh-secret.env &gt; /tmp/querymesh-secret.json</pre>
 <p><b>Step 5.</b> Check that the JSON is valid (prints the key names again):</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">jq -r &#x27;keys[]&#x27; /tmp/querymesh-secret.json</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">jq -r &#x27;keys[]&#x27; /tmp/querymesh-secret.json</pre>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Piece</b></td><td style="background-color:#e0e0e0"><b>What it does</b></td></tr>
-<tr><td><span style="font-family:Roboto Mono">grep -E &#x27;^(A|B|C)=.&#x27;</span></td><td>keep only lines that start with one of these names and have at least one character after the = sign</td></tr>
-<tr><td><span style="font-family:Roboto Mono">jq -R -s</span></td><td>read the whole file as one raw text (not as JSON)</td></tr>
-<tr><td><span style="font-family:Roboto Mono">split(...)</span></td><td>cut the text into lines at every line break</td></tr>
-<tr><td><span style="font-family:Roboto Mono">capture(&quot;^(?&lt;key&gt;[^=]+)=(?&lt;value&gt;.*)$&quot;)</span></td><td>split each line at the FIRST = sign into {&quot;key&quot;: ..., &quot;value&quot;: ...}</td></tr>
-<tr><td><span style="font-family:Roboto Mono">from_entries</span></td><td>turn the list of key/value pairs into one JSON object {&quot;JINA_API_KEY&quot;: &quot;...&quot;, ...}</td></tr>
-<tr><td><span style="font-family:Roboto Mono">file:///tmp/...</span> (next table)</td><td>the AWS CLI reads the value from this file, so it never appears in your shell history</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">grep -E &#x27;^(A|B|C)=.&#x27;</span></td><td>keep only lines that start with one of these names and have at least one character after the = sign</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">jq -R -s</span></td><td>read the whole file as one raw text (not as JSON)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">split(...)</span></td><td>cut the text into lines at every line break</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">capture(&quot;^(?&lt;key&gt;[^=]+)=(?&lt;value&gt;.*)<span style="font-family:'Roboto Mono'">$</span>&quot;)</span></td><td>split each line at the FIRST = sign into {&quot;key&quot;: ..., &quot;value&quot;: ...}</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">from_entries</span></td><td>turn the list of key/value pairs into one JSON object {&quot;JINA_API_KEY&quot;: &quot;...&quot;, ...}</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">file:///tmp/...</span> (next table)</td><td>the AWS CLI reads the value from this file, so it never appears in your shell history</td></tr>
 </table>
 <p><b>Step 6.</b> Do the rows of your column:</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Step</b></td><td style="background-color:#e0e0e0"><b>FakeCloud (free practice)</b></td><td style="background-color:#9fc5e8"><b>Real AWS (same step)</b></td></tr>
-<tr><td>1 Create the secret</td><td><span style="font-family:Roboto Mono">aws secretsmanager create-secret --name querymesh/app --secret-string file:///tmp/querymesh-secret.json</span></td><td style="background-color:#cfe2f3">same (costs US$0.40 per month [41])</td></tr>
-<tr><td>2 Read it back (only the key names)</td><td><span style="font-family:Roboto Mono">aws secretsmanager get-secret-value --secret-id querymesh/app --query SecretString --output text | jq -r &#x27;keys[]&#x27;</span></td><td style="background-color:#cfe2f3">same; or console: Secrets Manager &gt; Secrets &gt; querymesh/app &gt; Retrieve secret value</td></tr>
-<tr><td>3 Delete the JSON file from disk</td><td><span style="font-family:Roboto Mono">rm /tmp/querymesh-secret.json</span> (keep /tmp/querymesh-secret.env until Section 6B.9)</td><td style="background-color:#cfe2f3"><span style="font-family:Roboto Mono">rm /tmp/querymesh-secret.json /tmp/querymesh-secret.env</span></td></tr>
+<tr><td>1 Create the secret</td><td><span style="font-family:'Roboto Mono'">aws secretsmanager create-secret --name querymesh/app --secret-string file:///tmp/querymesh-secret.json</span></td><td style="background-color:#cfe2f3">same (costs US<span style="font-family:'Roboto Mono'">$</span>0.40 per month [41])</td></tr>
+<tr><td>2 Read it back (only the key names)</td><td><span style="font-family:'Roboto Mono'">aws secretsmanager get-secret-value --secret-id querymesh/app --query SecretString --output text | jq -r &#x27;keys[]&#x27;</span></td><td style="background-color:#cfe2f3">same; or console: Secrets Manager &gt; Secrets &gt; querymesh/app &gt; Retrieve secret value</td></tr>
+<tr><td>3 Delete the JSON file from disk</td><td><span style="font-family:'Roboto Mono'">rm /tmp/querymesh-secret.json</span> (keep /tmp/querymesh-secret.env until Section 6B.9)</td><td style="background-color:#cfe2f3"><span style="font-family:'Roboto Mono'">rm /tmp/querymesh-secret.json /tmp/querymesh-secret.env</span></td></tr>
 <tr><td>You should see</td><td>row 2 lists the same keys as Step 3</td><td style="background-color:#cfe2f3">the same, plus an ARN like arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:querymesh/app-AbC123 at row 1</td></tr>
-<tr><td>4 Later, to change a value</td><td>edit .env, repeat Steps 2 and 4, then <span style="font-family:Roboto Mono">aws secretsmanager put-secret-value --secret-id querymesh/app --secret-string file:///tmp/querymesh-secret.json</span></td><td style="background-color:#cfe2f3">same; ESO copies the new value into the cluster within 1 hour (refreshInterval)</td></tr>
+<tr><td>4 Later, to change a value</td><td>edit .env, repeat Steps 2 and 4, then <span style="font-family:'Roboto Mono'">aws secretsmanager put-secret-value --secret-id querymesh/app --secret-string file:///tmp/querymesh-secret.json</span></td><td style="background-color:#cfe2f3">same; ESO copies the new value into the cluster within 1 hour (refreshInterval)</td></tr>
 </table>
 <p><b style="color:#bf1a1a">Watch out:</b> REDIS_URL must be your Upstash rediss:// URL (Section 5.8). A redis://localhost URL works on the VM but not inside the cluster.</p>
 <p><b style="color:#1a7333">CHECKPOINT:</b> row 2 of the table prints the key names in your column.</p>
-<p><b>If not:</b> <span style="font-family:Roboto Mono">ResourceExistsException</span> = the secret already exists: use row 4 (put-secret-value) instead of row 1.</p>
+<p><b>If not:</b> <span style="font-family:'Roboto Mono'">ResourceExistsException</span> = the secret already exists: use row 4 (put-secret-value) instead of row 1.</p>
 <h2>SECTION 6B.7 - Create the Kubernetes cluster in the cloud</h2>
 <p><b>WHERE:</b> VS Code, project ~/querymesh, same terminal as Section 6B.5 (ACCOUNT_ID set)</p>
 <p><b>GOAL:</b> white column: you practise the EKS API calls on FakeCloud (it stores the cluster, but has no real Kubernetes, so kind from Section 6B.4 is your real cluster) [8]. Light blue column: eksctl builds a real EKS cluster with 2 worker machines (15 to 25 minutes).</p>
 <p><b>Step 1.</b> Create the file deploy/aws/secrets-read-policy.json (Section 2B.3 procedure) and paste:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">{
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">{
   &quot;Version&quot;: &quot;2012-10-17&quot;,
   &quot;Statement&quot;: [
     {
@@ -432,13 +432,13 @@ nodes:
 }</pre>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
-<tr><td><span style="font-family:Roboto Mono">&quot;Version&quot;: &quot;2012-10-17&quot;</span></td><td>the IAM policy language version (always this date)</td></tr>
-<tr><td><span style="font-family:Roboto Mono">&quot;Effect&quot;: &quot;Allow&quot;</span></td><td>this statement gives permission</td></tr>
-<tr><td><span style="font-family:Roboto Mono">&quot;Action&quot;: [ &quot;secretsmanager:GetSecretValue&quot;, ... ]</span></td><td>read a secret&#x27;s value and its description, policy and versions: exactly what ESO needs, nothing more (no write, no delete)</td></tr>
-<tr><td><span style="font-family:Roboto Mono">&quot;Resource&quot;: &quot;arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:querymesh/*&quot;</span></td><td>only secrets whose name starts with querymesh/ in your account. The * also covers the random 6-letter ending AWS adds to every secret ARN. ACCOUNT_ID is replaced by row 2 below</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">&quot;Version&quot;: &quot;2012-10-17&quot;</span></td><td>the IAM policy language version (always this date)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">&quot;Effect&quot;: &quot;Allow&quot;</span></td><td>this statement gives permission</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">&quot;Action&quot;: [ &quot;secretsmanager:GetSecretValue&quot;, ... ]</span></td><td>read a secret&#x27;s value and its description, policy and versions: exactly what ESO needs, nothing more (no write, no delete)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">&quot;Resource&quot;: &quot;arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:querymesh/*&quot;</span></td><td>only secrets whose name starts with querymesh/ in your account. The * also covers the random 6-letter ending AWS adds to every secret ARN. ACCOUNT_ID is replaced by row 2 below</td></tr>
 </table>
 <p><b>Step 2.</b> Create the file deploy/aws/eksctl-cluster.yaml and paste:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2"># Real AWS: an EKS cluster with 2 worker machines, Pod Identity, and the IAM roles the
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2"># Real AWS: an EKS cluster with 2 worker machines, Pod Identity, and the IAM roles the
 # AWS Load Balancer Controller and External Secrets Operator need.
 apiVersion: eksctl.io/v1alpha5
 kind: ClusterConfig
@@ -474,47 +474,47 @@ managedNodeGroups:
     privateNetworking: true</pre>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
-<tr><td><span style="font-family:Roboto Mono">apiVersion: eksctl.io/v1alpha5</span> and <span style="font-family:Roboto Mono">kind: ClusterConfig</span></td><td>this is an eksctl cluster description</td></tr>
-<tr><td><span style="font-family:Roboto Mono">metadata: name: querymesh, region: us-east-1, version: &quot;1.35&quot;</span></td><td>cluster name, AWS region and Kubernetes version (1.35 is in standard support) (verify the list with <span style="font-family:Roboto Mono">aws eks describe-cluster-versions</span>)</td></tr>
-<tr><td><span style="font-family:Roboto Mono">vpc: nat: gateway: Single</span></td><td>eksctl creates a new network (VPC) with public and private subnets and ONE NAT gateway, the door through which the private machines reach the internet (US$0.045/h). All outgoing traffic of the pods leaves through this one address</td></tr>
-<tr><td><span style="font-family:Roboto Mono">iam: withOIDC: true</span></td><td>creates the OIDC identity provider of the cluster (needed by some add-ons)</td></tr>
-<tr><td><span style="font-family:Roboto Mono">podIdentityAssociations:</span></td><td>links Kubernetes service accounts to IAM roles (Pod Identity); eksctl creates the roles</td></tr>
-<tr><td><span style="font-family:Roboto Mono">namespace: kube-system</span>, <span style="font-family:Roboto Mono">serviceAccountName: aws-load-balancer-controller</span>, <span style="font-family:Roboto Mono">wellKnownPolicies: awsLoadBalancerController: true</span></td><td>the load balancer controller (Section 6B.10) gets the official IAM permissions to create ALBs</td></tr>
-<tr><td><span style="font-family:Roboto Mono">namespace: external-secrets</span>, <span style="font-family:Roboto Mono">serviceAccountName: external-secrets</span>, <span style="font-family:Roboto Mono">permissionPolicyARNs: [...QueryMeshSecretsRead]</span></td><td>ESO (Section 6B.9) gets ONLY the read policy of Step 1</td></tr>
-<tr><td><span style="font-family:Roboto Mono">addons: eks-pod-identity-agent, vpc-cni, coredns, kube-proxy</span></td><td>the Pod Identity agent (required for the associations above), pod networking, DNS names inside the cluster, and Service routing</td></tr>
-<tr><td><span style="font-family:Roboto Mono">managedNodeGroups: name: ng-general, instanceType: t3.large</span></td><td>the worker machines: t3.large = 2 vCPU, 8 GB RAM, US$0.0832/h each [41]</td></tr>
-<tr><td><span style="font-family:Roboto Mono">minSize: 2, desiredCapacity: 2, maxSize: 3</span></td><td>start 2 machines; AWS may scale between 2 and 3</td></tr>
-<tr><td><span style="font-family:Roboto Mono">volumeSize: 30</span></td><td>30 GB disk per machine (images are large)</td></tr>
-<tr><td><span style="font-family:Roboto Mono">privateNetworking: true</span></td><td>the machines get no public IP: they sit in private subnets, reachable only through the ALB</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">apiVersion: eksctl.io/v1alpha5</span> and <span style="font-family:'Roboto Mono'">kind: ClusterConfig</span></td><td>this is an eksctl cluster description</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">metadata: name: querymesh, region: us-east-1, version: &quot;1.35&quot;</span></td><td>cluster name, AWS region and Kubernetes version (1.35 is in standard support) (verify the list with <span style="font-family:'Roboto Mono'">aws eks describe-cluster-versions</span>)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">vpc: nat: gateway: Single</span></td><td>eksctl creates a new network (VPC) with public and private subnets and ONE NAT gateway, the door through which the private machines reach the internet (US<span style="font-family:'Roboto Mono'">$</span>0.045/h). All outgoing traffic of the pods leaves through this one address</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">iam: withOIDC: true</span></td><td>creates the OIDC identity provider of the cluster (needed by some add-ons)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">podIdentityAssociations:</span></td><td>links Kubernetes service accounts to IAM roles (Pod Identity); eksctl creates the roles</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">namespace: kube-system</span>, <span style="font-family:'Roboto Mono'">serviceAccountName: aws-load-balancer-controller</span>, <span style="font-family:'Roboto Mono'">wellKnownPolicies: awsLoadBalancerController: true</span></td><td>the load balancer controller (Section 6B.10) gets the official IAM permissions to create ALBs</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">namespace: external-secrets</span>, <span style="font-family:'Roboto Mono'">serviceAccountName: external-secrets</span>, <span style="font-family:'Roboto Mono'">permissionPolicyARNs: [...QueryMeshSecretsRead]</span></td><td>ESO (Section 6B.9) gets ONLY the read policy of Step 1</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">addons: eks-pod-identity-agent, vpc-cni, coredns, kube-proxy</span></td><td>the Pod Identity agent (required for the associations above), pod networking, DNS names inside the cluster, and Service routing</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">managedNodeGroups: name: ng-general, instanceType: t3.large</span></td><td>the worker machines: t3.large = 2 vCPU, 8 GB RAM, US<span style="font-family:'Roboto Mono'">$</span>0.0832/h each [41]</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">minSize: 2, desiredCapacity: 2, maxSize: 3</span></td><td>start 2 machines; AWS may scale between 2 and 3</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">volumeSize: 30</span></td><td>30 GB disk per machine (images are large)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">privateNetworking: true</span></td><td>the machines get no public IP: they sit in private subnets, reachable only through the ALB</td></tr>
 </table>
 <p><b>Step 3.</b> Do the rows of your column:</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Step</b></td><td style="background-color:#e0e0e0"><b>FakeCloud (free practice)</b></td><td style="background-color:#9fc5e8"><b>Real AWS (same step)</b></td></tr>
-<tr><td>1 Target and account</td><td><span style="font-family:Roboto Mono">source scripts/use_fakecloud.sh &amp;&amp; export ACCOUNT_ID=123456789012</span></td><td style="background-color:#cfe2f3"><span style="font-family:Roboto Mono">source scripts/use_aws.sh &amp;&amp; export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)</span></td></tr>
-<tr><td>2 Fill in your account ID</td><td><span style="font-family:Roboto Mono">sed &quot;s/ACCOUNT_ID/$ACCOUNT_ID/g&quot; deploy/aws/secrets-read-policy.json &gt; /tmp/secrets-read-policy.json</span></td><td style="background-color:#cfe2f3">same</td></tr>
-<tr><td>3 Create the read-only secrets policy</td><td><span style="font-family:Roboto Mono">aws iam create-policy --policy-name QueryMeshSecretsRead --policy-document file:///tmp/secrets-read-policy.json</span></td><td style="background-color:#cfe2f3">same</td></tr>
-<tr><td>4 Network (eksctl does this for you on AWS)</td><td><span style="font-family:Roboto Mono">export VPC_ID=$(aws ec2 create-vpc --cidr-block 10.0.0.0/16 --query Vpc.VpcId --output text) &amp;&amp; echo $VPC_ID</span></td><td style="background-color:#cfe2f3">not needed (eksctl creates the VPC in row 8)</td></tr>
-<tr><td>5 Two subnets in two zones</td><td><span style="font-family:Roboto Mono">export S1=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block 10.0.1.0/24 --availability-zone us-east-1a --query Subnet.SubnetId --output text)</span> then <span style="font-family:Roboto Mono">export S2=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block 10.0.2.0/24 --availability-zone us-east-1b --query Subnet.SubnetId --output text)</span></td><td style="background-color:#cfe2f3">not needed (eksctl)</td></tr>
-<tr><td>6 Role the EKS control plane uses</td><td><span style="font-family:Roboto Mono">aws iam create-role --role-name querymesh-eks-cluster --assume-role-policy-document &#x27;{&quot;Version&quot;:&quot;2012-10-17&quot;,&quot;Statement&quot;:[{&quot;Effect&quot;:&quot;Allow&quot;,&quot;Principal&quot;:{&quot;Service&quot;:&quot;eks.amazonaws.com&quot;},&quot;Action&quot;:&quot;sts:AssumeRole&quot;}]}&#x27;</span></td><td style="background-color:#cfe2f3">not needed (eksctl)</td></tr>
-<tr><td>7 Fill in the account ID in the cluster file</td><td><span style="font-family:Roboto Mono">sed &quot;s/ACCOUNT_ID/$ACCOUNT_ID/g&quot; deploy/aws/eksctl-cluster.yaml &gt; /tmp/eksctl-cluster.yaml</span></td><td style="background-color:#cfe2f3">same</td></tr>
-<tr><td>8 Create the cluster</td><td><span style="font-family:Roboto Mono">aws eks create-cluster --name querymesh --role-arn arn:aws:iam::$ACCOUNT_ID:role/querymesh-eks-cluster --resources-vpc-config subnetIds=$S1,$S2</span></td><td style="background-color:#cfe2f3"><span style="font-family:Roboto Mono">eksctl create cluster -f /tmp/eksctl-cluster.yaml</span> (15-25 minutes; BILLING STARTS: control plane US$0.10/h + 2 machines + NAT)</td></tr>
-<tr><td>9 Check the status</td><td><span style="font-family:Roboto Mono">aws eks describe-cluster --name querymesh --query cluster.status</span></td><td style="background-color:#cfe2f3">same</td></tr>
-<tr><td>You should see</td><td>&quot;CREATING&quot; first, then &quot;ACTIVE&quot;. FakeCloud only stores this record: there is NO Kubernetes behind it [8]</td><td style="background-color:#cfe2f3">eksctl prints <span style="font-family:Roboto Mono">EKS cluster &quot;querymesh&quot; in &quot;us-east-1&quot; region is ready</span>; status &quot;ACTIVE&quot;</td></tr>
-<tr><td>10 Point kubectl at the cluster</td><td><span style="font-family:Roboto Mono">kubectl config use-context kind-querymesh</span> (kind is your real cluster on FakeCloud days)</td><td style="background-color:#cfe2f3">eksctl already did it; check with <span style="font-family:Roboto Mono">kubectl config current-context</span> (shows ...@querymesh.us-east-1.eksctl.io)</td></tr>
-<tr><td>11 See the machines</td><td><span style="font-family:Roboto Mono">kubectl get nodes</span> (2 kind nodes)</td><td style="background-color:#cfe2f3"><span style="font-family:Roboto Mono">kubectl get nodes</span> (2 nodes ip-192-168-...ec2.internal, Ready)</td></tr>
-<tr><td>12 Remember the network ID (used in 6B.10 and 6B.12)</td><td>already in $VPC_ID</td><td style="background-color:#cfe2f3"><span style="font-family:Roboto Mono">export VPC_ID=$(aws eks describe-cluster --name querymesh --query cluster.resourcesVpcConfig.vpcId --output text) &amp;&amp; echo $VPC_ID</span></td></tr>
+<tr><td>1 Target and account</td><td><span style="font-family:'Roboto Mono'">source scripts/use_fakecloud.sh &amp;&amp; export ACCOUNT_ID=123456789012</span></td><td style="background-color:#cfe2f3"><span style="font-family:'Roboto Mono'">source scripts/use_aws.sh &amp;&amp; export ACCOUNT_ID=<span style="font-family:'Roboto Mono'">$</span>(aws sts get-caller-identity --query Account --output text)</span></td></tr>
+<tr><td>2 Fill in your account ID</td><td><span style="font-family:'Roboto Mono'">sed &quot;s/ACCOUNT_ID/<span style="font-family:'Roboto Mono'">$</span>ACCOUNT_ID/g&quot; deploy/aws/secrets-read-policy.json &gt; /tmp/secrets-read-policy.json</span></td><td style="background-color:#cfe2f3">same</td></tr>
+<tr><td>3 Create the read-only secrets policy</td><td><span style="font-family:'Roboto Mono'">aws iam create-policy --policy-name QueryMeshSecretsRead --policy-document file:///tmp/secrets-read-policy.json</span></td><td style="background-color:#cfe2f3">same</td></tr>
+<tr><td>4 Network (eksctl does this for you on AWS)</td><td><span style="font-family:'Roboto Mono'">export VPC_ID=<span style="font-family:'Roboto Mono'">$</span>(aws ec2 create-vpc --cidr-block 10.0.0.0/16 --query Vpc.VpcId --output text) &amp;&amp; echo <span style="font-family:'Roboto Mono'">$</span>VPC_ID</span></td><td style="background-color:#cfe2f3">not needed (eksctl creates the VPC in row 8)</td></tr>
+<tr><td>5 Two subnets in two zones</td><td><span style="font-family:'Roboto Mono'">export S1=<span style="font-family:'Roboto Mono'">$</span>(aws ec2 create-subnet --vpc-id <span style="font-family:'Roboto Mono'">$</span>VPC_ID --cidr-block 10.0.1.0/24 --availability-zone us-east-1a --query Subnet.SubnetId --output text)</span> then <span style="font-family:'Roboto Mono'">export S2=<span style="font-family:'Roboto Mono'">$</span>(aws ec2 create-subnet --vpc-id <span style="font-family:'Roboto Mono'">$</span>VPC_ID --cidr-block 10.0.2.0/24 --availability-zone us-east-1b --query Subnet.SubnetId --output text)</span></td><td style="background-color:#cfe2f3">not needed (eksctl)</td></tr>
+<tr><td>6 Role the EKS control plane uses</td><td><span style="font-family:'Roboto Mono'">aws iam create-role --role-name querymesh-eks-cluster --assume-role-policy-document &#x27;{&quot;Version&quot;:&quot;2012-10-17&quot;,&quot;Statement&quot;:[{&quot;Effect&quot;:&quot;Allow&quot;,&quot;Principal&quot;:{&quot;Service&quot;:&quot;eks.amazonaws.com&quot;},&quot;Action&quot;:&quot;sts:AssumeRole&quot;}]}&#x27;</span></td><td style="background-color:#cfe2f3">not needed (eksctl)</td></tr>
+<tr><td>7 Fill in the account ID in the cluster file</td><td><span style="font-family:'Roboto Mono'">sed &quot;s/ACCOUNT_ID/<span style="font-family:'Roboto Mono'">$</span>ACCOUNT_ID/g&quot; deploy/aws/eksctl-cluster.yaml &gt; /tmp/eksctl-cluster.yaml</span></td><td style="background-color:#cfe2f3">same</td></tr>
+<tr><td>8 Create the cluster</td><td><span style="font-family:'Roboto Mono'">aws eks create-cluster --name querymesh --role-arn arn:aws:iam::<span style="font-family:'Roboto Mono'">$</span>ACCOUNT_ID:role/querymesh-eks-cluster --resources-vpc-config subnetIds=<span style="font-family:'Roboto Mono'">$</span>S1,<span style="font-family:'Roboto Mono'">$</span>S2</span></td><td style="background-color:#cfe2f3"><span style="font-family:'Roboto Mono'">eksctl create cluster -f /tmp/eksctl-cluster.yaml</span> (15-25 minutes; BILLING STARTS: control plane US<span style="font-family:'Roboto Mono'">$</span>0.10/h + 2 machines + NAT)</td></tr>
+<tr><td>9 Check the status</td><td><span style="font-family:'Roboto Mono'">aws eks describe-cluster --name querymesh --query cluster.status</span></td><td style="background-color:#cfe2f3">same</td></tr>
+<tr><td>You should see</td><td>&quot;CREATING&quot; first, then &quot;ACTIVE&quot;. FakeCloud only stores this record: there is NO Kubernetes behind it [8]</td><td style="background-color:#cfe2f3">eksctl prints <span style="font-family:'Roboto Mono'">EKS cluster &quot;querymesh&quot; in &quot;us-east-1&quot; region is ready</span>; status &quot;ACTIVE&quot;</td></tr>
+<tr><td>10 Point kubectl at the cluster</td><td><span style="font-family:'Roboto Mono'">kubectl config use-context kind-querymesh</span> (kind is your real cluster on FakeCloud days)</td><td style="background-color:#cfe2f3">eksctl already did it; check with <span style="font-family:'Roboto Mono'">kubectl config current-context</span> (shows ...@querymesh.us-east-1.eksctl.io)</td></tr>
+<tr><td>11 See the machines</td><td><span style="font-family:'Roboto Mono'">kubectl get nodes</span> (2 kind nodes)</td><td style="background-color:#cfe2f3"><span style="font-family:'Roboto Mono'">kubectl get nodes</span> (2 nodes ip-192-168-...ec2.internal, Ready)</td></tr>
+<tr><td>12 Remember the network ID (used in 6B.10 and 6B.12)</td><td>already in <span style="font-family:'Roboto Mono'">$</span>VPC_ID</td><td style="background-color:#cfe2f3"><span style="font-family:'Roboto Mono'">export VPC_ID=<span style="font-family:'Roboto Mono'">$</span>(aws eks describe-cluster --name querymesh --query cluster.resourcesVpcConfig.vpcId --output text) &amp;&amp; echo <span style="font-family:'Roboto Mono'">$</span>VPC_ID</span></td></tr>
 <tr><td>Placeholder</td><td>Replace with</td><td style="background-color:#cfe2f3">Example</td></tr>
 <tr><td>ACCOUNT_ID (in the two files)</td><td>your 12-digit AWS account ID; rows 2 and 7 replace it automatically with sed</td><td style="background-color:#cfe2f3">123456789012 (FakeCloud), 4815162342xx (yours)</td></tr>
 </table>
-<p><b style="color:#bf1a1a">Watch out:</b> eksctl prints a lot and takes long; do not press Ctrl+C. If your laptop sleeps, the SSH session (not the VM) may drop: run row 8 inside tmux (<span style="font-family:Roboto Mono">tmux new -s eks</span>) so it survives.</p>
+<p><b style="color:#bf1a1a">Watch out:</b> eksctl prints a lot and takes long; do not press Ctrl+C. If your laptop sleeps, the SSH session (not the VM) may drop: run row 8 inside tmux (<span style="font-family:'Roboto Mono'">tmux new -s eks</span>) so it survives.</p>
 <p><b style="color:#bf1a1a">Watch out:</b> eksctl creates CloudFormation stacks named eksctl-querymesh-cluster and eksctl-querymesh-nodegroup-ng-general. Always delete with eksctl (Section 6B.15), never by hand in the console.</p>
 <p><b style="color:#1a7333">CHECKPOINT:</b> row 9 says ACTIVE and row 11 shows 2 Ready nodes in your column.</p>
 <p><b>If not:</b> AWS column: open CloudFormation in the console, click the stack in ROLLBACK, tab Events, read the first red reason (often a missing permission of your IAM user or a quota).</p>
 <h2>SECTION 6B.8 - Put OpenSearch on the cluster</h2>
-<p><b>WHERE:</b> VS Code Terminal, kubectl pointing at the cluster of your column (<span style="font-family:Roboto Mono">kubectl config current-context</span>)</p>
+<p><b>WHERE:</b> VS Code Terminal, kubectl pointing at the cluster of your column (<span style="font-family:'Roboto Mono'">kubectl config current-context</span>)</p>
 <p><b>GOAL:</b> one OpenSearch node inside the cluster, reachable by the pods as <a href="http://opensearch-cluster-master:9200">http://opensearch-cluster-master:9200</a>.</p>
 <p><b>Step 1.</b> Create the file deploy/k8s/opensearch-values.yaml and paste:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2"># One small OpenSearch node with security switched off (it is only reachable inside the cluster).
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2"># One small OpenSearch node with security switched off (it is only reachable inside the cluster).
 singleNode: true
 protocol: http
 opensearchJavaOpts: &quot;-Xms1g -Xmx1g&quot;
@@ -536,34 +536,34 @@ config:
     plugins.security.disabled: true</pre>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
-<tr><td><span style="font-family:Roboto Mono">singleNode: true</span></td><td>one OpenSearch machine instead of the chart&#x27;s default of three (enough for learning)</td></tr>
-<tr><td><span style="font-family:Roboto Mono">protocol: http</span></td><td>plain HTTP inside the cluster (the security plugin is off, see below)</td></tr>
-<tr><td><span style="font-family:Roboto Mono">opensearchJavaOpts: &quot;-Xms1g -Xmx1g&quot;</span></td><td>give OpenSearch 1 GB of Java memory (fits on a t3.large)</td></tr>
-<tr><td><span style="font-family:Roboto Mono">resources: requests: {cpu: 500m, memory: 2Gi}</span></td><td>Kubernetes reserves half a CPU and 2 GB RAM for it</td></tr>
-<tr><td><span style="font-family:Roboto Mono">persistence: enabled: false</span></td><td>no disk volume: data is lost when the pod restarts. The ingestion CronJob refills it. For real production use a volume or Amazon OpenSearch Service (Part 7)</td></tr>
-<tr><td><span style="font-family:Roboto Mono">sysctlInit: enabled: true</span></td><td>a small start-up container sets vm.max_map_count=262144 on the machine, which OpenSearch requires</td></tr>
-<tr><td><span style="font-family:Roboto Mono">DISABLE_INSTALL_DEMO_CONFIG</span> and <span style="font-family:Roboto Mono">DISABLE_SECURITY_PLUGIN</span> = &quot;true&quot;</td><td>no demo certificates and no login. Acceptable only because OpenSearch has no Ingress: nothing outside the cluster can reach it</td></tr>
-<tr><td><span style="font-family:Roboto Mono">config: opensearch.yml: ...</span></td><td>the OpenSearch settings file: cluster name, listen on all addresses, security plugin disabled</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">singleNode: true</span></td><td>one OpenSearch machine instead of the chart&#x27;s default of three (enough for learning)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">protocol: http</span></td><td>plain HTTP inside the cluster (the security plugin is off, see below)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">opensearchJavaOpts: &quot;-Xms1g -Xmx1g&quot;</span></td><td>give OpenSearch 1 GB of Java memory (fits on a t3.large)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">resources: requests: {cpu: 500m, memory: 2Gi}</span></td><td>Kubernetes reserves half a CPU and 2 GB RAM for it</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">persistence: enabled: false</span></td><td>no disk volume: data is lost when the pod restarts. The ingestion CronJob refills it. For real production use a volume or Amazon OpenSearch Service (Part 7)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">sysctlInit: enabled: true</span></td><td>a small start-up container sets vm.max_map_count=262144 on the machine, which OpenSearch requires</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">DISABLE_INSTALL_DEMO_CONFIG</span> and <span style="font-family:'Roboto Mono'">DISABLE_SECURITY_PLUGIN</span> = &quot;true&quot;</td><td>no demo certificates and no login. Acceptable only because OpenSearch has no Ingress: nothing outside the cluster can reach it</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">config: opensearch.yml: ...</span></td><td>the OpenSearch settings file: cluster name, listen on all addresses, security plugin disabled</td></tr>
 </table>
 <p><b>Step 2.</b> Do the rows of your column:</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Step</b></td><td style="background-color:#e0e0e0"><b>FakeCloud (free practice)</b></td><td style="background-color:#9fc5e8"><b>Real AWS (same step)</b></td></tr>
-<tr><td>1 Namespace (a folder for our objects)</td><td><span style="font-family:Roboto Mono">kubectl create namespace querymesh</span></td><td style="background-color:#cfe2f3">same</td></tr>
-<tr><td>2 Add the OpenSearch chart repository</td><td><span style="font-family:Roboto Mono">helm repo add opensearch <a href="https://opensearch-project.github.io/helm-charts/">https://opensearch-project.github.io/helm-charts/</a></span></td><td style="background-color:#cfe2f3">same</td></tr>
-<tr><td>3 Download its chart list</td><td><span style="font-family:Roboto Mono">helm repo update</span></td><td style="background-color:#cfe2f3">same</td></tr>
-<tr><td>4 Install OpenSearch 3.9.0</td><td><span style="font-family:Roboto Mono">helm install opensearch opensearch/opensearch --version 3.9.0 -n querymesh -f deploy/k8s/opensearch-values.yaml</span></td><td style="background-color:#cfe2f3">same</td></tr>
-<tr><td>5 Wait until it is ready (1-3 minutes)</td><td><span style="font-family:Roboto Mono">kubectl -n querymesh rollout status statefulset/opensearch-cluster-master --timeout=600s</span></td><td style="background-color:#cfe2f3">same</td></tr>
-<tr><td>6 Test it from inside the cluster</td><td><span style="font-family:Roboto Mono">kubectl -n querymesh run curl-test --rm -it --restart=Never --image=curlimages/curl -- curl -s <a href="http://opensearch-cluster-master:9200">http://opensearch-cluster-master:9200</a></span></td><td style="background-color:#cfe2f3">same</td></tr>
-<tr><td>You should see</td><td><span style="font-family:Roboto Mono">partitioned roll out complete</span> at row 5 and JSON with &quot;number&quot; : &quot;3.9.0&quot; at row 6</td><td style="background-color:#cfe2f3">the same</td></tr>
+<tr><td>1 Namespace (a folder for our objects)</td><td><span style="font-family:'Roboto Mono'">kubectl create namespace querymesh</span></td><td style="background-color:#cfe2f3">same</td></tr>
+<tr><td>2 Add the OpenSearch chart repository</td><td><span style="font-family:'Roboto Mono'">helm repo add opensearch <a href="https://opensearch-project.github.io/helm-charts/">https://opensearch-project.github.io/helm-charts/</a></span></td><td style="background-color:#cfe2f3">same</td></tr>
+<tr><td>3 Download its chart list</td><td><span style="font-family:'Roboto Mono'">helm repo update</span></td><td style="background-color:#cfe2f3">same</td></tr>
+<tr><td>4 Install OpenSearch 3.9.0</td><td><span style="font-family:'Roboto Mono'">helm install opensearch opensearch/opensearch --version 3.9.0 -n querymesh -f deploy/k8s/opensearch-values.yaml</span></td><td style="background-color:#cfe2f3">same</td></tr>
+<tr><td>5 Wait until it is ready (1-3 minutes)</td><td><span style="font-family:'Roboto Mono'">kubectl -n querymesh rollout status statefulset/opensearch-cluster-master --timeout=600s</span></td><td style="background-color:#cfe2f3">same</td></tr>
+<tr><td>6 Test it from inside the cluster</td><td><span style="font-family:'Roboto Mono'">kubectl -n querymesh run curl-test --rm -it --restart=Never --image=curlimages/curl -- curl -s <a href="http://opensearch-cluster-master:9200">http://opensearch-cluster-master:9200</a></span></td><td style="background-color:#cfe2f3">same</td></tr>
+<tr><td>You should see</td><td><span style="font-family:'Roboto Mono'">partitioned roll out complete</span> at row 5 and JSON with &quot;number&quot; : &quot;3.9.0&quot; at row 6</td><td style="background-color:#cfe2f3">the same</td></tr>
 </table>
-<p><b style="color:#bf1a1a">Watch out:</b> if row 5 times out, run <span style="font-family:Roboto Mono">kubectl -n querymesh describe pod opensearch-cluster-master-0</span> and read Events at the bottom: &quot;Insufficient memory&quot; means the machines are too small or busy.</p>
+<p><b style="color:#bf1a1a">Watch out:</b> if row 5 times out, run <span style="font-family:'Roboto Mono'">kubectl -n querymesh describe pod opensearch-cluster-master-0</span> and read Events at the bottom: &quot;Insufficient memory&quot; means the machines are too small or busy.</p>
 <p><b style="color:#1a7333">CHECKPOINT:</b> row 6 prints the OpenSearch version JSON.</p>
-<p><b>If not:</b> <span style="font-family:Roboto Mono">kubectl -n querymesh logs opensearch-cluster-master-0 --tail 30</span> shows why OpenSearch stopped (most often vm.max_map_count: check that sysctlInit is enabled in the values file).</p>
+<p><b>If not:</b> <span style="font-family:'Roboto Mono'">kubectl -n querymesh logs opensearch-cluster-master-0 --tail 30</span> shows why OpenSearch stopped (most often vm.max_map_count: check that sysctlInit is enabled in the values file).</p>
 <h2>SECTION 6B.9 - Get the secrets into the cluster</h2>
 <p><b>WHERE:</b> VS Code Terminal, project ~/querymesh</p>
 <p><b>GOAL:</b> a Kubernetes Secret called querymesh-secrets in namespace querymesh. White column: you copy it from FakeCloud&#x27;s Secrets Manager by hand. Light blue column: the External Secrets Operator copies it from AWS Secrets Manager automatically and keeps it up to date [39].</p>
 <p><b>Step 1.</b> Create the file deploy/k8s/cluster-secret-store.yaml and paste:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2"># Tells External Secrets Operator how to reach AWS Secrets Manager (credentials via EKS Pod Identity).
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2"># Tells External Secrets Operator how to reach AWS Secrets Manager (credentials via EKS Pod Identity).
 apiVersion: external-secrets.io/v1
 kind: ClusterSecretStore
 metadata:
@@ -575,30 +575,30 @@ spec:
       region: us-east-1</pre>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
-<tr><td><span style="font-family:Roboto Mono">apiVersion: external-secrets.io/v1</span> and <span style="font-family:Roboto Mono">kind: ClusterSecretStore</span></td><td>an ESO object (API version v1; older v1beta1 files are rejected by ESO 2.x) that every namespace may use</td></tr>
-<tr><td><span style="font-family:Roboto Mono">name: aws-secretsmanager</span></td><td>the name the chart&#x27;s ExternalSecret refers to (values.yaml: externalSecrets.storeName)</td></tr>
-<tr><td><span style="font-family:Roboto Mono">provider: aws: service: SecretsManager, region: us-east-1</span></td><td>read from AWS Secrets Manager in us-east-1</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">apiVersion: external-secrets.io/v1</span> and <span style="font-family:'Roboto Mono'">kind: ClusterSecretStore</span></td><td>an ESO object (API version v1; older v1beta1 files are rejected by ESO 2.x) that every namespace may use</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">name: aws-secretsmanager</span></td><td>the name the chart&#x27;s ExternalSecret refers to (values.yaml: externalSecrets.storeName)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">provider: aws: service: SecretsManager, region: us-east-1</span></td><td>read from AWS Secrets Manager in us-east-1</td></tr>
 <tr><td>(no auth block)</td><td>ESO uses its own service account&#x27;s IAM role through Pod Identity, created by eksctl in Section 6B.7</td></tr>
 </table>
 <p><b>Step 2.</b> Do the rows of your column:</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Step</b></td><td style="background-color:#e0e0e0"><b>FakeCloud (free practice)</b></td><td style="background-color:#9fc5e8"><b>Real AWS (same step)</b></td></tr>
-<tr><td>1 Target</td><td><span style="font-family:Roboto Mono">source scripts/use_fakecloud.sh &amp;&amp; kubectl config use-context kind-querymesh</span></td><td style="background-color:#cfe2f3"><span style="font-family:Roboto Mono">source scripts/use_aws.sh</span> and check <span style="font-family:Roboto Mono">kubectl config current-context</span> shows the EKS cluster</td></tr>
-<tr><td>2 Read the secret from Secrets Manager into KEY=value lines</td><td><span style="font-family:Roboto Mono">aws secretsmanager get-secret-value --secret-id querymesh/app --query SecretString --output text | jq -r &#x27;to_entries[] | &quot;\(.key)=\(.value)&quot;&#x27; &gt; /tmp/from-secrets-manager.env</span></td><td style="background-color:#cfe2f3">not needed: ESO does this inside the cluster</td></tr>
-<tr><td>3 Create the Kubernetes Secret</td><td><span style="font-family:Roboto Mono">kubectl -n querymesh create secret generic querymesh-secrets --from-env-file=/tmp/from-secrets-manager.env</span></td><td style="background-color:#cfe2f3">not needed: the chart&#x27;s ExternalSecret (Section 6B.11) makes ESO create it</td></tr>
-<tr><td>4 Remove the file with the values</td><td><span style="font-family:Roboto Mono">rm /tmp/from-secrets-manager.env /tmp/querymesh-secret.env</span></td><td style="background-color:#cfe2f3">nothing to remove</td></tr>
-<tr><td>5 Add the ESO chart repository</td><td>not needed on kind</td><td style="background-color:#cfe2f3"><span style="font-family:Roboto Mono">helm repo add external-secrets <a href="https://charts.external-secrets.io">https://charts.external-secrets.io</a> &amp;&amp; helm repo update</span></td></tr>
-<tr><td>6 Install ESO 2.13.0</td><td>not needed on kind</td><td style="background-color:#cfe2f3"><span style="font-family:Roboto Mono">helm install external-secrets external-secrets/external-secrets -n external-secrets --create-namespace --version 2.13.0</span></td></tr>
-<tr><td>7 Wait for ESO</td><td>not needed on kind</td><td style="background-color:#cfe2f3"><span style="font-family:Roboto Mono">kubectl -n external-secrets rollout status deployment/external-secrets --timeout=300s</span></td></tr>
-<tr><td>8 Tell ESO where the secrets live</td><td>not needed on kind</td><td style="background-color:#cfe2f3"><span style="font-family:Roboto Mono">kubectl apply -f deploy/k8s/cluster-secret-store.yaml</span></td></tr>
-<tr><td>9 Check the connection</td><td><span style="font-family:Roboto Mono">kubectl -n querymesh get secret querymesh-secrets -o jsonpath=&#x27;{.data}&#x27; | jq -r &#x27;keys[]&#x27;</span> (lists the key names)</td><td style="background-color:#cfe2f3"><span style="font-family:Roboto Mono">kubectl get clustersecretstore aws-secretsmanager</span> (STATUS Valid, READY True)</td></tr>
+<tr><td>1 Target</td><td><span style="font-family:'Roboto Mono'">source scripts/use_fakecloud.sh &amp;&amp; kubectl config use-context kind-querymesh</span></td><td style="background-color:#cfe2f3"><span style="font-family:'Roboto Mono'">source scripts/use_aws.sh</span> and check <span style="font-family:'Roboto Mono'">kubectl config current-context</span> shows the EKS cluster</td></tr>
+<tr><td>2 Read the secret from Secrets Manager into KEY=value lines</td><td><span style="font-family:'Roboto Mono'">aws secretsmanager get-secret-value --secret-id querymesh/app --query SecretString --output text | jq -r &#x27;to_entries[] | &quot;\(.key)=\(.value)&quot;&#x27; &gt; /tmp/from-secrets-manager.env</span></td><td style="background-color:#cfe2f3">not needed: ESO does this inside the cluster</td></tr>
+<tr><td>3 Create the Kubernetes Secret</td><td><span style="font-family:'Roboto Mono'">kubectl -n querymesh create secret generic querymesh-secrets --from-env-file=/tmp/from-secrets-manager.env</span></td><td style="background-color:#cfe2f3">not needed: the chart&#x27;s ExternalSecret (Section 6B.11) makes ESO create it</td></tr>
+<tr><td>4 Remove the file with the values</td><td><span style="font-family:'Roboto Mono'">rm /tmp/from-secrets-manager.env /tmp/querymesh-secret.env</span></td><td style="background-color:#cfe2f3">nothing to remove</td></tr>
+<tr><td>5 Add the ESO chart repository</td><td>not needed on kind</td><td style="background-color:#cfe2f3"><span style="font-family:'Roboto Mono'">helm repo add external-secrets <a href="https://charts.external-secrets.io">https://charts.external-secrets.io</a> &amp;&amp; helm repo update</span></td></tr>
+<tr><td>6 Install ESO 2.13.0</td><td>not needed on kind</td><td style="background-color:#cfe2f3"><span style="font-family:'Roboto Mono'">helm install external-secrets external-secrets/external-secrets -n external-secrets --create-namespace --version 2.13.0</span></td></tr>
+<tr><td>7 Wait for ESO</td><td>not needed on kind</td><td style="background-color:#cfe2f3"><span style="font-family:'Roboto Mono'">kubectl -n external-secrets rollout status deployment/external-secrets --timeout=300s</span></td></tr>
+<tr><td>8 Tell ESO where the secrets live</td><td>not needed on kind</td><td style="background-color:#cfe2f3"><span style="font-family:'Roboto Mono'">kubectl apply -f deploy/k8s/cluster-secret-store.yaml</span></td></tr>
+<tr><td>9 Check the connection</td><td><span style="font-family:'Roboto Mono'">kubectl -n querymesh get secret querymesh-secrets -o jsonpath=&#x27;{.data}&#x27; | jq -r &#x27;keys[]&#x27;</span> (lists the key names)</td><td style="background-color:#cfe2f3"><span style="font-family:'Roboto Mono'">kubectl get clustersecretstore aws-secretsmanager</span> (STATUS Valid, READY True)</td></tr>
 <tr><td>Piece</td><td>What it does</td><td style="background-color:#cfe2f3"></td></tr>
-<tr><td><span style="font-family:Roboto Mono">jq -r &#x27;to_entries[] | &quot;\(.key)=\(.value)&quot;&#x27;</span></td><td>turns the JSON object back into KEY=value lines</td><td style="background-color:#cfe2f3"></td></tr>
-<tr><td><span style="font-family:Roboto Mono">--from-env-file</span></td><td>one Secret entry per line of the file</td><td style="background-color:#cfe2f3"></td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">jq -r &#x27;to_entries[] | &quot;\(.key)=\(.value)&quot;&#x27;</span></td><td>turns the JSON object back into KEY=value lines</td><td style="background-color:#cfe2f3"></td></tr>
+<tr><td><span style="font-family:'Roboto Mono'">--from-env-file</span></td><td>one Secret entry per line of the file</td><td style="background-color:#cfe2f3"></td></tr>
 <tr><td>ExternalSecret (in the chart, created in Section 6B.12)</td><td>&quot;copy every key of querymesh/app into the Secret querymesh-secrets, check again every hour&quot;</td><td style="background-color:#cfe2f3"></td></tr>
 </table>
-<p><b style="color:#bf1a1a">Watch out:</b> on kind you must repeat rows 2-4 whenever you change the secret (delete the old one first with <span style="font-family:Roboto Mono">kubectl -n querymesh delete secret querymesh-secrets</span>). On EKS, ESO does this by itself within the refreshInterval (1 hour).</p>
-<p><b style="color:#bf1a1a">Watch out:</b> (light blue column) if the store shows <span style="font-family:Roboto Mono">InvalidProviderConfig</span> or AccessDenied, the Pod Identity association is missing: run <span style="font-family:Roboto Mono">eksctl get podidentityassociation --cluster querymesh</span> and check there is a line for external-secrets/external-secrets (verify the exact command output format).</p>
+<p><b style="color:#bf1a1a">Watch out:</b> on kind you must repeat rows 2-4 whenever you change the secret (delete the old one first with <span style="font-family:'Roboto Mono'">kubectl -n querymesh delete secret querymesh-secrets</span>). On EKS, ESO does this by itself within the refreshInterval (1 hour).</p>
+<p><b style="color:#bf1a1a">Watch out:</b> (light blue column) if the store shows <span style="font-family:'Roboto Mono'">InvalidProviderConfig</span> or AccessDenied, the Pod Identity association is missing: run <span style="font-family:'Roboto Mono'">eksctl get podidentityassociation --cluster querymesh</span> and check there is a line for external-secrets/external-secrets (verify the exact command output format).</p>
 <p><b style="color:#1a7333">CHECKPOINT:</b> white: row 9 lists the key names. Light blue: row 9 shows Valid / True.</p>
-<p><b>If not:</b> white: <span style="font-family:Roboto Mono">NotFound</span> on the namespace = do Section 6B.8 row 1 first.</p>
+<p><b>If not:</b> white: <span style="font-family:'Roboto Mono'">NotFound</span> on the namespace = do Section 6B.8 row 1 first.</p>
 </body></html>

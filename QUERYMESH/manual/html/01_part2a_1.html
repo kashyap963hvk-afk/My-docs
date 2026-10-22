@@ -46,7 +46,7 @@
 <p><b>Step 4.</b> Log in to <a href="https://console.hyperstack.cloud">https://console.hyperstack.cloud</a></p>
 <p><b>Step 5.</b> In the left menu click Billing.</p>
 <p><b>Step 6.</b> Activate billing (add a payment card when asked).</p>
-<p><b>Step 7.</b> Add credit: US$20-30 is enough for the whole manual.</p>
+<p><b>Step 7.</b> Add credit: US<span style="font-family:'Roboto Mono'">$</span>20-30 is enough for the whole manual.</p>
 <p><b>You should see:</b> your credit balance on the Billing page.</p>
 <p><b style="color:#bf1a1a">Watch out:</b> Hyperstack only lets you deploy after you have topped up your balance. If the balance goes below 0, Hyperstack hibernates your VMs automatically [3].</p>
 <p><b style="color:#bf1a1a">Watch out:</b> only use addresses ending in hyperstack.cloud; look-alike websites exist.</p>
@@ -55,15 +55,15 @@
 <p><b>WHERE:</b> Windows laptop &gt; Start menu &gt; type PowerShell &gt; click Windows PowerShell</p>
 <p><b>GOAL:</b> a private key file and a public key file in C:\Users\YOUR_NAME\.ssh</p>
 <p><b>Step 1.</b> Check that SSH is installed. Type and press Enter:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">ssh -V</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">ssh -V</pre>
 <p><b>You should see:</b> OpenSSH_for_Windows_9.x ...</p>
 <p><b>Step 2.</b> Create the key pair. Type and press Enter:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">ssh-keygen -t ed25519 -f $env:USERPROFILE\.ssh\hyperstack_ed25519 -C &quot;querymesh&quot;</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">ssh-keygen -t ed25519 -f <span style="font-family:'Roboto Mono'">$</span>env:USERPROFILE\.ssh\hyperstack_ed25519 -C &quot;querymesh&quot;</pre>
 <p><b>Step 3.</b> When it asks &quot;Enter passphrase (empty for no passphrase)&quot;, press Enter.</p>
 <p><b>Step 4.</b> When it asks &quot;Enter same passphrase again&quot;, press Enter.</p>
 <p><b>You should see:</b> &quot;Your identification has been saved in C:\Users\YOUR_NAME\.ssh\hyperstack_ed25519&quot; and a small square picture of random characters.</p>
 <p><b>Step 5.</b> Print the PUBLIC key:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">Get-Content $env:USERPROFILE\.ssh\hyperstack_ed25519.pub</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">Get-Content <span style="font-family:'Roboto Mono'">$</span>env:USERPROFILE\.ssh\hyperstack_ed25519.pub</pre>
 <p><b>You should see:</b> one line starting with ssh-ed25519 and ending with querymesh</p>
 <p><b>Step 6.</b> Select that whole line with the mouse and press Ctrl+C (copy). Keep PowerShell open.</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
@@ -72,7 +72,7 @@
 <tr><td>Piece of the command</td><td>What it does</td><td></td></tr>
 <tr><td>ssh-keygen</td><td>the program that makes key pairs</td><td></td></tr>
 <tr><td>-t ed25519</td><td>the key type: modern, short and secure</td><td></td></tr>
-<tr><td>-f $env:USERPROFILE\.ssh\hyperstack_ed25519</td><td>where to save it: your user folder, sub-folder .ssh, file name hyperstack_ed25519</td><td></td></tr>
+<tr><td>-f <span style="font-family:'Roboto Mono'">$</span>env:USERPROFILE\.ssh\hyperstack_ed25519</td><td>where to save it: your user folder, sub-folder .ssh, file name hyperstack_ed25519</td><td></td></tr>
 <tr><td>-C &quot;querymesh&quot;</td><td>a comment at the end of the public key, so you recognise it later</td><td></td></tr>
 </table>
 <p><b style="color:#bf1a1a">Watch out:</b> the file WITHOUT .pub is your private key: never upload, e-mail or share it.</p>
@@ -109,7 +109,7 @@
 <p><b>Step 1.</b> Fill the form one field at a time, exactly as in this table.</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Field (in the form)</b></td><td style="background-color:#e0e0e0"><b>Value</b></td><td style="background-color:#e0e0e0"><b>Why</b></td></tr>
-<tr><td>Flavor (GPU card)</td><td>RTX-A6000, GPU count 1 (flavor name n3-RTX-A6000x1)</td><td>48 GB of GPU memory runs Qwen3-4B in vLLM with room to spare, for about US$0.50 per hour [1]</td></tr>
+<tr><td>Flavor (GPU card)</td><td>RTX-A6000, GPU count 1 (flavor name n3-RTX-A6000x1)</td><td>48 GB of GPU memory runs Qwen3-4B in vLLM with room to spare, for about US<span style="font-family:'Roboto Mono'">$</span>0.50 per hour [1]</td></tr>
 <tr><td>Environment</td><td>querymesh-env</td><td>holds your key</td></tr>
 <tr><td>OS image (tab OS Images)</td><td>Ubuntu Server 24.04 LTS R570 CUDA 12.8 with Docker</td><td>NVIDIA driver 570, CUDA 12.8, Docker and the NVIDIA container toolkit already installed; user ubuntu is in the docker group [4]</td></tr>
 <tr><td>SSH key</td><td>querymesh-key</td><td>lets you log in</td></tr>
@@ -119,13 +119,13 @@
 <tr><td>Virtual Machine Name (Additional settings)</td><td>querymesh-gpu</td><td>easy to recognise</td></tr>
 <tr><td>Jupyter Notebook, Cloud-init Script, Labels, Firewall Rules</td><td>leave empty / off</td><td>not needed; we use port forwarding instead of opening ports</td></tr>
 </table>
-<p><b>Step 2.</b> Look at Final Configuration and Price Breakdown and check the hourly price (about US$0.50 per hour for 1x RTX A6000, verify).</p>
+<p><b>Step 2.</b> Look at Final Configuration and Price Breakdown and check the hourly price (about US<span style="font-family:'Roboto Mono'">$</span>0.50 per hour for 1x RTX A6000, verify).</p>
 <p><b>Step 3.</b> Click Deploy.</p>
 <p><b>You should see:</b> the Virtual Machines page with querymesh-gpu and a status such as CREATING or BUILD.</p>
 <p><b style="color:#bf1a1a">Watch out:</b> billing starts when the status becomes ACTIVE [2].</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>If you see...</b></td><td style="background-color:#e0e0e0"><b>It means...</b></td><td style="background-color:#e0e0e0"><b>Do this next</b></td></tr>
-<tr><td>RTX-A6000 is greyed out</td><td>sold out in this region</td><td>choose 1x L40 (n3-L40x1, about US$1.00/h) or 1x A100 80GB (n3-A100x1, about US$1.35/h); everything in this manual works the same</td></tr>
+<tr><td>RTX-A6000 is greyed out</td><td>sold out in this region</td><td>choose 1x L40 (n3-L40x1, about US<span style="font-family:'Roboto Mono'">$</span>1.00/h) or 1x A100 80GB (n3-A100x1, about US<span style="font-family:'Roboto Mono'">$</span>1.35/h); everything in this manual works the same</td></tr>
 <tr><td>the image &quot;Ubuntu Server 24.04 LTS R570 CUDA 12.8 with Docker&quot; is missing</td><td>different images in this region</td><td>choose &quot;Ubuntu Server 24.04 LTS R595 CUDA 13.2 with Docker&quot; (newer driver, also works with the vLLM image)</td></tr>
 <tr><td>&quot;Insufficient balance&quot;</td><td>no credit</td><td>go back to Section 2A.3 Step 7</td></tr>
 </table>
@@ -148,14 +148,14 @@
 <p><b>WHERE:</b> Windows PowerShell on your laptop</p>
 <p><b>GOAL:</b> log in to the GPU computer and see the GPU.</p>
 <p><b>Step 1.</b> Type (replace VM_IP) and press Enter:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">ssh -i $env:USERPROFILE\.ssh\hyperstack_ed25519 ubuntu@VM_IP</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">ssh -i <span style="font-family:'Roboto Mono'">$</span>env:USERPROFILE\.ssh\hyperstack_ed25519 ubuntu@VM_IP</pre>
 <p><b>Step 2.</b> When asked &quot;Are you sure you want to continue connecting (yes/no/[fingerprint])?&quot; type yes and press Enter.</p>
-<p><b>You should see:</b> a welcome text and the prompt ubuntu@querymesh-gpu:~$</p>
+<p><b>You should see:</b> a welcome text and the prompt ubuntu@querymesh-gpu:~<span style="font-family:'Roboto Mono'">$</span></p>
 <p><b>Step 3.</b> Type and press Enter:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">nvidia-smi</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">nvidia-smi</pre>
 <p><b>You should see:</b> a table containing &quot;NVIDIA RTX A6000&quot;, &quot;49140MiB&quot; (48 GB) of memory, &quot;Driver Version: 570.xx&quot; and &quot;CUDA Version: 12.8&quot;.</p>
 <p><b>Step 4.</b> Check the disk space:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">df -h /</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">df -h /</pre>
 <p><b>You should see:</b> the root disk / with at least 80 GB free. The vLLM image (about 10 GB), the model (about 8 GB) and the Python packages (about 8 GB) fit easily.</p>
 <p><b>Step 5.</b> Type exit and press Enter (you are back on your laptop).</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
@@ -171,7 +171,7 @@
 <p><b>Step 2.</b> Type Remote-SSH: Open SSH Configuration File and press Enter.</p>
 <p><b>Step 3.</b> Click the first file: C:\Users\YOUR_NAME\.ssh\config</p>
 <p><b>Step 4.</b> Paste this at the end of the file (replace VM_IP and YOUR_NAME):</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">Host querymesh
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">Host querymesh
     HostName VM_IP
     User ubuntu
     IdentityFile C:\Users\YOUR_NAME\.ssh\hyperstack_ed25519
@@ -183,7 +183,7 @@
 <p><b>Step 9.</b> If a box asks &quot;Select the platform of the remote host&quot;, click Linux.</p>
 <p><b>Step 10.</b> Wait until the bottom-left corner shows SSH: querymesh (the first time VS Code installs a small server on the VM, about 1 minute).</p>
 <p><b>Step 11.</b> In the top menu click Terminal &gt; New Terminal.</p>
-<p><b>You should see:</b> a terminal panel at the bottom with the prompt ubuntu@querymesh-gpu:~$</p>
+<p><b>You should see:</b> a terminal panel at the bottom with the prompt ubuntu@querymesh-gpu:~<span style="font-family:'Roboto Mono'">$</span></p>
 <p><b>Step 12.</b> In that terminal type hostname and press Enter.</p>
 <p><b>You should see:</b> querymesh-gpu</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
@@ -246,7 +246,7 @@
 <p><b>WHERE:</b> VS Code (connected, bottom-left shows SSH: querymesh)</p>
 <p><b>GOAL:</b> a web page served on the VM opens at <a href="http://localhost:PORT">http://localhost:PORT</a> on your laptop, with no firewall change.</p>
 <p><b>Step 1.</b> In the VS Code Terminal start a tiny test web server on port 8765:</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">python3 -m http.server 8765</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">python3 -m http.server 8765</pre>
 <p><b>You should see:</b> Serving HTTP on 0.0.0.0 port 8765 (<a href="http://0.0.0.0:8765/">http://0.0.0.0:8765/</a>) ...</p>
 <p><b>Step 2.</b> In the bottom panel click the PORTS tab (next to TERMINAL).</p>
 <p><b>Step 3.</b> Click Forward a Port (or the + button).</p>
@@ -298,11 +298,11 @@
 <tr><td style="background-color:#e0e0e0"><b>Symptom</b></td><td style="background-color:#e0e0e0"><b>Likely cause</b></td><td style="background-color:#e0e0e0"><b>Exact fix</b></td></tr>
 <tr><td>ssh: connect to host ... port 22: Connection timed out</td><td>SSH access off, wrong IP, or VM not ACTIVE</td><td>1) VM status must be ACTIVE. 2) Firewall tab &gt; Enable SSH access ON. 3) Copy the IP again from the PUBLIC IP column</td></tr>
 <tr><td>Permission denied (publickey)</td><td>wrong key file or wrong user</td><td>use -i with the file WITHOUT .pub and the user ubuntu; the key must be imported in the SAME environment as the VM</td></tr>
-<tr><td>WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED</td><td>new VM on an old IP</td><td>in PowerShell run <span style="font-family:Roboto Mono">ssh-keygen -R VM_IP</span>, then connect again</td></tr>
+<tr><td>WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED</td><td>new VM on an old IP</td><td>in PowerShell run <span style="font-family:'Roboto Mono'">ssh-keygen -R VM_IP</span>, then connect again</td></tr>
 <tr><td>VS Code stuck on &quot;Setting up SSH host&quot;</td><td>half-installed VS Code server</td><td>F1 &gt; Remote-SSH: Kill VS Code Server on Host, connect again</td></tr>
 <tr><td>WinSCP &quot;Server refused our key&quot;</td><td>key not in PuTTY format</td><td>use the .ppk file from Section 2A.11 Step 15</td></tr>
 <tr><td>nvidia-smi: command not found</td><td>wrong OS image (no driver)</td><td>delete the VM and deploy again with an image whose name contains R570 CUDA 12.8 with Docker</td></tr>
-<tr><td>localhost:PORT does not open in the browser</td><td>the service is not running or the port is not forwarded</td><td>check the PORTS tab; on the VM run <span style="font-family:Roboto Mono">curl -s localhost:PORT</span> to see if the service answers</td></tr>
+<tr><td>localhost:PORT does not open in the browser</td><td>the service is not running or the port is not forwarded</td><td>check the PORTS tab; on the VM run <span style="font-family:'Roboto Mono'">curl -s localhost:PORT</span> to see if the service answers</td></tr>
 </table>
 <p><b style="color:#1a7333">CHECKPOINT:</b> after the fix, Section 2A.9 Step 1 logs you in again.</p>
 </body></html>

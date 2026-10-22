@@ -1,7 +1,7 @@
 <html><head><meta charset="utf-8"></head><body style="font-family:Arial">
 <h1>QUERYMESH - Zero-to-Elite Lab Manual (beginner edition, October 2026)</h1>
 <p>Who this is for: a beginner who knows a little Python and wants to build, deploy and explain a production-grade multi-agent RAG system. Every step is one action. Every file is created by you, in a folder you create. Nothing is skipped.</p>
-<p>Assumptions (change anything that is wrong for you): Windows 11 laptop with no usable GPU; goal = the QueryMesh portfolio project exactly as written on your resume, which you can build, show and defend in AI-engineer interviews; budget = pay-as-you-go GPU on Hyperstack (about US$15-25 for the whole manual), free tiers for Jina, Upstash, Logfire, Langfuse, Telegram and GitHub, FakeCloud is free, real AWS is optional (about US$3-6 if you follow the teardown steps the same day).</p>
+<p>Assumptions (change anything that is wrong for you): Windows 11 laptop with no usable GPU; goal = the QueryMesh portfolio project exactly as written on your resume, which you can build, show and defend in AI-engineer interviews; budget = pay-as-you-go GPU on Hyperstack (about US<span style="font-family:'Roboto Mono'">$</span>15-25 for the whole manual), free tiers for Jina, Upstash, Logfire, Langfuse, Telegram and GitHub, FakeCloud is free, real AWS is optional (about US<span style="font-family:'Roboto Mono'">$</span>3-6 if you follow the teardown steps the same day).</p>
 <h2>WHERE TO FIND WHAT (read this first)</h2>
 <p>This document is split into tabs. Click a tab name in the left panel of Google Docs (Document tabs, under PROJECTS &gt; Querymesh) to open it.</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
@@ -39,7 +39,7 @@
 <tr><td><b>WHERE:</b></td><td>the exact place you do the work (which app, which window, which folder)</td></tr>
 <tr><td><b>GOAL:</b></td><td>what this section achieves, in one line</td></tr>
 <tr><td><b>Step 1.</b> Step 2. ...</td><td>one action per step; do them in order</td></tr>
-<tr><td>grey box</td><td>text you type or paste EXACTLY (never type a prompt sign such as $ or PS C:\&gt;)</td></tr>
+<tr><td>grey box</td><td>text you type or paste EXACTLY (never type a prompt sign such as <span style="font-family:'Roboto Mono'">$</span> or PS C:\&gt;)</td></tr>
 <tr><td><b>You should see:</b></td><td>what appears if the step worked</td></tr>
 <tr><td><b style="color:#bf1a1a">Watch out:</b></td><td>the mistake beginners make here, and how to avoid it</td></tr>
 <tr><td><b style="color:#1a7333">CHECKPOINT:</b></td><td>what must be true before you continue; If not: the fix</td></tr>
@@ -65,7 +65,7 @@
 <tr><td>4 Basics</td><td>ingest arXiv papers, hybrid search, Airflow schedule</td><td>3-4 h</td></tr>
 <tr><td>5 Intermediate</td><td>five agents, supervisor graph, agentic retry loop, cache</td><td>3-4 h</td></tr>
 <tr><td>6A Advanced</td><td>MCP + A2A agent servers, tracing, JWT API, Gradio, Telegram</td><td>4-5 h</td></tr>
-<tr><td>6B Advanced</td><td>Docker, kind, Helm, FakeCloud and AWS EKS, CI/CD, teardown</td><td>5-6 h (+ about US$3-6 on AWS)</td></tr>
+<tr><td>6B Advanced</td><td>Docker, kind, Helm, FakeCloud and AWS EKS, CI/CD, teardown</td><td>5-6 h (+ about US<span style="font-family:'Roboto Mono'">$</span>3-6 on AWS)</td></tr>
 <tr><td>7 Elite</td><td>measure retrieval and answers like a lab, tune, harden</td><td>3-4 h</td></tr>
 <tr><td>8-14 Reference</td><td>tools, maintenance, troubleshooting, projects, cheat sheet, self-test, sources</td><td>reference</td></tr>
 </table>
@@ -115,17 +115,17 @@
 <h2>0.6 What it costs</h2>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Item</b></td><td style="background-color:#e0e0e0"><b>Price (October 2026)</b></td><td style="background-color:#e0e0e0"><b>How much you need</b></td><td style="background-color:#e0e0e0"><b>Approx. cost</b></td></tr>
-<tr><td>Hyperstack 1x RTX A6000 48 GB (n3-RTX-A6000x1)</td><td>about US$0.50 per hour [1] (verify on the pricing page)</td><td>about 25-35 hours in total</td><td>US$13-18</td></tr>
-<tr><td>Hyperstack storage while hibernated</td><td>cents per day (root disk + optional kept IP) [3]</td><td>a few days</td><td>under US$2</td></tr>
-<tr><td>Jina AI embeddings</td><td>free: 10 million tokens per new key [17]</td><td>about 2-5 million tokens</td><td>US$0</td></tr>
-<tr><td>Upstash Redis</td><td>free: 1 database, 250 MB, 500K commands per month [28]</td><td>always</td><td>US$0</td></tr>
-<tr><td>Pydantic Logfire</td><td>free Personal plan: 10 million spans/logs/metrics per month [26]</td><td>always</td><td>US$0</td></tr>
-<tr><td>Langfuse Cloud</td><td>free Hobby plan: 50k units per month, 30 days of data [27]</td><td>always</td><td>US$0</td></tr>
-<tr><td>Telegram, GitHub</td><td>free</td><td>always</td><td>US$0</td></tr>
-<tr><td>FakeCloud, kind</td><td>free and open source [6][32]</td><td>always</td><td>US$0</td></tr>
-<tr><td>AWS EKS control plane</td><td>US$0.10 per hour [36]</td><td>3-4 hours</td><td>about US$0.40</td></tr>
-<tr><td>AWS 2x t3.large nodes + 1 NAT gateway + 1 ALB</td><td>US$0.0832/h each + US$0.045/h + US$0.0225/h, plus small data charges [41]</td><td>3-4 hours</td><td>about US$1.50</td></tr>
-<tr><td>AWS Secrets Manager, ECR, S3</td><td>US$0.40 per secret per month, US$0.10 per GB-month [41]</td><td>Part 6B</td><td>under US$1</td></tr>
+<tr><td>Hyperstack 1x RTX A6000 48 GB (n3-RTX-A6000x1)</td><td>about US<span style="font-family:'Roboto Mono'">$</span>0.50 per hour [1] (verify on the pricing page)</td><td>about 25-35 hours in total</td><td>US<span style="font-family:'Roboto Mono'">$</span>13-18</td></tr>
+<tr><td>Hyperstack storage while hibernated</td><td>cents per day (root disk + optional kept IP) [3]</td><td>a few days</td><td>under US<span style="font-family:'Roboto Mono'">$</span>2</td></tr>
+<tr><td>Jina AI embeddings</td><td>free: 10 million tokens per new key [17]</td><td>about 2-5 million tokens</td><td>US<span style="font-family:'Roboto Mono'">$</span>0</td></tr>
+<tr><td>Upstash Redis</td><td>free: 1 database, 250 MB, 500K commands per month [28]</td><td>always</td><td>US<span style="font-family:'Roboto Mono'">$</span>0</td></tr>
+<tr><td>Pydantic Logfire</td><td>free Personal plan: 10 million spans/logs/metrics per month [26]</td><td>always</td><td>US<span style="font-family:'Roboto Mono'">$</span>0</td></tr>
+<tr><td>Langfuse Cloud</td><td>free Hobby plan: 50k units per month, 30 days of data [27]</td><td>always</td><td>US<span style="font-family:'Roboto Mono'">$</span>0</td></tr>
+<tr><td>Telegram, GitHub</td><td>free</td><td>always</td><td>US<span style="font-family:'Roboto Mono'">$</span>0</td></tr>
+<tr><td>FakeCloud, kind</td><td>free and open source [6][32]</td><td>always</td><td>US<span style="font-family:'Roboto Mono'">$</span>0</td></tr>
+<tr><td>AWS EKS control plane</td><td>US<span style="font-family:'Roboto Mono'">$</span>0.10 per hour [36]</td><td>3-4 hours</td><td>about US<span style="font-family:'Roboto Mono'">$</span>0.40</td></tr>
+<tr><td>AWS 2x t3.large nodes + 1 NAT gateway + 1 ALB</td><td>US<span style="font-family:'Roboto Mono'">$</span>0.0832/h each + US<span style="font-family:'Roboto Mono'">$</span>0.045/h + US<span style="font-family:'Roboto Mono'">$</span>0.0225/h, plus small data charges [41]</td><td>3-4 hours</td><td>about US<span style="font-family:'Roboto Mono'">$</span>1.50</td></tr>
+<tr><td>AWS Secrets Manager, ECR, S3</td><td>US<span style="font-family:'Roboto Mono'">$</span>0.40 per secret per month, US<span style="font-family:'Roboto Mono'">$</span>0.10 per GB-month [41]</td><td>Part 6B</td><td>under US<span style="font-family:'Roboto Mono'">$</span>1</td></tr>
 </table>
 <p><b style="color:#bf1a1a">Watch out:</b> Hyperstack keeps billing a machine that is only &quot;stopped&quot; (SHUTOFF). Only HIBERNATED or deleted machines stop the GPU bill [3]. Section 2A.13 shows how. On AWS, the EKS cluster, nodes, NAT gateway and ALB bill every hour until you run the teardown in Section 6B.15.</p>
 <h1>PART 1 - Prerequisites</h1>
@@ -135,7 +135,7 @@
 <tr><td>Python basics: variables, lists, dicts, functions, f-strings, reading an error message</td><td>MUST</td></tr>
 <tr><td>JSON: objects, arrays, double-quoted strings</td><td>MUST</td></tr>
 <tr><td>Terminal basics: cd, ls, pwd, cat, mkdir</td><td>MUST</td></tr>
-<tr><td>Environment variables: export NAME=value, echo $NAME</td><td>MUST</td></tr>
+<tr><td>Environment variables: export NAME=value, echo <span style="font-family:'Roboto Mono'">$</span>NAME</td><td>MUST</td></tr>
 <tr><td>HTTP APIs: URL, GET/POST, JSON body, status codes</td><td>MUST</td></tr>
 <tr><td>async / await in Python</td><td>NICE-TO-HAVE (explained where it is used, Part 5)</td></tr>
 <tr><td>What an LLM, an embedding and RAG are</td><td>NICE-TO-HAVE (taught in Part 3)</td></tr>
@@ -145,30 +145,30 @@
 </table>
 <h2>1.2 Refreshers and 1-minute checks</h2>
 <p>Python. A dict maps keys to values; a list keeps order; a function returns a value. Check: what does this print?</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">paper = {&quot;title&quot;: &quot;RRF&quot;, &quot;authors&quot;: [&quot;Cormack&quot;, &quot;Clarke&quot;]}
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">paper = {&quot;title&quot;: &quot;RRF&quot;, &quot;authors&quot;: [&quot;Cormack&quot;, &quot;Clarke&quot;]}
 print(len(paper[&quot;authors&quot;]), paper.get(&quot;year&quot;, &quot;unknown&quot;))</pre>
 <p><b>Answer:</b> 2 unknown</p>
 <p>JSON. Text format: {} objects, [] arrays, strings MUST use double quotes. APIs send and receive JSON. Check: which line is NOT valid JSON?</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">{&quot;question&quot;: &quot;What is RAG?&quot;, &quot;k&quot;: 5}
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">{&quot;question&quot;: &quot;What is RAG?&quot;, &quot;k&quot;: 5}
 {&#x27;question&#x27;: &#x27;What is RAG?&#x27;, &#x27;k&#x27;: 5}</pre>
 <p><b>Answer:</b> the second (single quotes are Python, not JSON).</p>
 <p>Terminal. pwd = where am I; ls = list files; cd folder = go into folder; cd .. = go up one folder; mkdir -p a/b = make folders; cat file = print a file. Check: after mkdir -p test/one and ls test you should see one.</p>
 <p>Environment variables. A named value that every program started from this terminal can read. QueryMesh reads all its settings (keys, addresses) this way, from a file called .env. Check: type the two lines below in any Linux terminal; the second prints hello.</p>
-<pre style="font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2">export GREETING=hello
-echo $GREETING</pre>
+<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">export GREETING=hello
+echo <span style="font-family:'Roboto Mono'">$</span>GREETING</pre>
 <p>HTTP APIs. A client sends a request (method, URL, JSON body); the server answers with a status code (200 OK, 401 not logged in, 422 invalid input, 500 server error) and JSON. Check: which code does QueryMesh return when you call /ask without a login token? Answer: 401.</p>
 <h2>1.3 Accounts to create now</h2>
 <p>Create these accounts before Part 2. Write every key you get into a private Notepad file on your laptop named secrets.txt (never into a chat, an e-mail or Git).</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>What</b></td><td style="background-color:#e0e0e0"><b>Where</b></td><td style="background-color:#e0e0e0"><b>Cost</b></td><td style="background-color:#e0e0e0"><b>Which option</b></td><td style="background-color:#e0e0e0"><b>Used in</b></td></tr>
-<tr><td>Hyperstack account</td><td><a href="https://console.hyperstack.cloud">https://console.hyperstack.cloud</a></td><td>pay as you go</td><td>add US$20-30 credit</td><td>Section 2A.3</td></tr>
+<tr><td>Hyperstack account</td><td><a href="https://console.hyperstack.cloud">https://console.hyperstack.cloud</a></td><td>pay as you go</td><td>add US<span style="font-family:'Roboto Mono'">$</span>20-30 credit</td><td>Section 2A.3</td></tr>
 <tr><td>Jina AI API key</td><td><a href="https://jina.ai/embeddings">https://jina.ai/embeddings</a></td><td>free 10M tokens</td><td>the free key shown on the page (no card)</td><td>Section 2B.8</td></tr>
 <tr><td>Upstash account</td><td><a href="https://console.upstash.com">https://console.upstash.com</a></td><td>free</td><td>Free plan, 1 Redis database</td><td>Section 5.8</td></tr>
 <tr><td>Pydantic Logfire account</td><td><a href="https://logfire.pydantic.dev">https://logfire.pydantic.dev</a></td><td>free</td><td>Personal plan</td><td>Section 6A.5</td></tr>
 <tr><td>Langfuse Cloud account</td><td><a href="https://cloud.langfuse.com">https://cloud.langfuse.com</a></td><td>free</td><td>Hobby plan (EU region)</td><td>Section 6A.6</td></tr>
 <tr><td>Telegram account</td><td>Telegram app on your phone or desktop</td><td>free</td><td>normal account</td><td>Section 6A.10</td></tr>
 <tr><td>GitHub account</td><td><a href="https://github.com/signup">https://github.com/signup</a></td><td>free</td><td>Free plan</td><td>Section 2B.13</td></tr>
-<tr><td>AWS account (optional, blue column)</td><td><a href="https://aws.amazon.com">https://aws.amazon.com</a></td><td>pay as you go</td><td>region us-east-1, set a US$10 budget alert</td><td>Section 2B.12</td></tr>
+<tr><td>AWS account (optional, blue column)</td><td><a href="https://aws.amazon.com">https://aws.amazon.com</a></td><td>pay as you go</td><td>region us-east-1, set a US<span style="font-family:'Roboto Mono'">$</span>10 budget alert</td><td>Section 2B.12</td></tr>
 </table>
 <p>Jina AI key in detail (you need it first):</p>
 <p><b>Step 1.</b> Open <a href="https://jina.ai/embeddings">https://jina.ai/embeddings</a> in your browser.</p>

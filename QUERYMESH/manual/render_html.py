@@ -11,8 +11,11 @@ from pathlib import Path
 from build_doc import INLINE_RE, LABEL_RE, ROOT, URL_RE
 
 LABEL_COLOR = {"Watch out:": "#bf1a1a", "CHECKPOINT:": "#1a7333"}
-CODE_STYLE = "font-family:Roboto Mono;font-size:9.5pt;background-color:#f2f2f2"  # grey code boxes
-SPAN_STYLE = "font-family:Roboto Mono"  # inline code
+CODE_STYLE = "font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2"  # grey code boxes
+SPAN_STYLE = "font-family:'Roboto Mono'"  # inline code
+# Google's HTML import turns text between two $ signs into a math equation; a $ inside its
+# own styled span is left alone.
+DOLLAR = f'<span style="{SPAN_STYLE}">$</span>'
 
 
 def inline(text: str) -> str:
@@ -22,7 +25,7 @@ def inline(text: str) -> str:
     if label:
         color = LABEL_COLOR.get(label.group(1))
         style = f' style="color:{color}"' if color else ""
-        out.append(f"<b{style}>{html.escape(label.group(1))}</b>")
+        out.append(f"<b{style}>{esc(label.group(1))}</b>")
         pos = label.end()
     for m in INLINE_RE.finditer(text, pos):
         out.append(links(text[pos:m.start()]))
@@ -35,19 +38,23 @@ def inline(text: str) -> str:
     return "".join(out)
 
 
+def esc(text: str) -> str:
+    return html.escape(text).replace("$", DOLLAR)
+
+
 def links(text: str) -> str:
     out, pos = [], 0
     for m in URL_RE.finditer(text):
-        out.append(html.escape(text[pos:m.start()]))
+        out.append(esc(text[pos:m.start()]))
         url = html.escape(m.group(0))
-        out.append(f'<a href="{url}">{url}</a>')
+        out.append(f'<a href="{url}">{esc(m.group(0))}</a>')
         pos = m.end()
-    out.append(html.escape(text[pos:]))
+    out.append(esc(text[pos:]))
     return "".join(out)
 
 
 def code_block(lines: list[str]) -> str:
-    body = "\n".join(html.escape(line) for line in lines)
+    body = "\n".join(esc(line) for line in lines)
     return f'<pre style="{CODE_STYLE}">{body}</pre>'
 
 
