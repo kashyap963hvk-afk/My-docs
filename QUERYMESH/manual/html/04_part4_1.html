@@ -1,4 +1,4 @@
-<html><head><meta charset="utf-8"></head><body style="font-family:Arial">
+<html><head><meta charset="utf-8"></head><body>
 <h1>PART 4 - BASICS: ingestion pipeline and hybrid search (resume lines 3 and 4)</h1>
 <p>This part builds the &quot;library&quot;: papers come in from arXiv every night, are cut into chunks, turned into vectors and stored in OpenSearch, and one function finds the best chunks for any question. Everything later (the agents, the API, Kubernetes) stands on what you build here.</p>
 <h2>4.0 What, why, when</h2>
@@ -8,10 +8,10 @@
 <p>Before you start, all of these must be true (from Part 2B):</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Check</b></td><td style="background-color:#e0e0e0"><b>Command (VS Code Terminal, folder ~/querymesh)</b></td><td style="background-color:#e0e0e0"><b>Expected</b></td></tr>
-<tr><td>venv active</td><td><span style="font-family:'Roboto Mono'">which python</span></td><td>/home/ubuntu/querymesh/.venv/bin/python</td></tr>
-<tr><td>OpenSearch running</td><td><span style="font-family:'Roboto Mono'">curl -s localhost:9200 | jq -r .version.number</span></td><td>3.9.0</td></tr>
-<tr><td>FakeCloud running</td><td><span style="font-family:'Roboto Mono'">curl -s localhost:4566/_fakecloud/health | jq -r .status</span></td><td>ok</td></tr>
-<tr><td>.env exists</td><td><span style="font-family:'Roboto Mono'">grep -c CHANGE_ME .env</span></td><td>a number; JINA_API_KEY must no longer be CHANGE_ME after Section 4.1</td></tr>
+<tr><td>venv active</td><td><span style="font-family:'Roboto Mono',monospace">which python</span></td><td>/home/ubuntu/querymesh/.venv/bin/python</td></tr>
+<tr><td>OpenSearch running</td><td><span style="font-family:'Roboto Mono',monospace">curl -s localhost:9200 | jq -r .version.number</span></td><td>3.9.0</td></tr>
+<tr><td>FakeCloud running</td><td><span style="font-family:'Roboto Mono',monospace">curl -s localhost:4566/_fakecloud/health | jq -r .status</span></td><td>ok</td></tr>
+<tr><td>.env exists</td><td><span style="font-family:'Roboto Mono',monospace">grep -c CHANGE_ME .env</span></td><td>a number; JINA_API_KEY must no longer be CHANGE_ME after Section 4.1</td></tr>
 </table>
 <p>The files you create in this part:</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
@@ -30,14 +30,14 @@
 <p><b style="color:#bf1a1a">Watch out:</b> the key is shown on that page only while the browser keeps it. Paste it into .env now (next steps). If you lose it, you can create a new one on the same page (verify: the page layout changes often; look for &quot;API Key&quot; or &quot;Get your API key&quot;).</p>
 <p><b>Step 4.</b> In VS Code Explorer, click the file .env to open it.</p>
 <p><b>Step 5.</b> Find the line JINA_API_KEY=CHANGE_ME and replace CHANGE_ME with your key, so it looks like this:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">JINA_API_KEY=JINA_KEY_HERE</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">JINA_API_KEY=JINA_KEY_HERE</pre>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Placeholder</b></td><td style="background-color:#e0e0e0"><b>Replace with</b></td><td style="background-color:#e0e0e0"><b>Example</b></td></tr>
 <tr><td>JINA_KEY_HERE</td><td>the key you copied in Step 3</td><td>jina_3f9a0c...</td></tr>
 </table>
 <p><b>Step 6.</b> Press Ctrl+S.</p>
 <p><b>Step 7.</b> Create the file querymesh/embeddings.py with THE procedure from Section 2B.3 (right-click the folder querymesh &gt; New File... &gt; type embeddings.py &gt; Enter), paste the grey box below, press Ctrl+S.</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;Turn text into vectors with the Jina AI embeddings API.&quot;&quot;&quot;
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;Turn text into vectors with the Jina AI embeddings API.&quot;&quot;&quot;
 import httpx
 
 from querymesh import config
@@ -76,28 +76,28 @@ if __name__ == &quot;__main__&quot;:
     print(f&quot;dimensions={len(vector)} first_values={[round(v, 4) for v in vector[:5]]}&quot;)</pre>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">import httpx</span></td><td>httpx is a library that sends web requests (like a browser, but from Python)</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">from querymesh import config</span></td><td>reads our settings module; config.JINA_API_KEY, config.EMBED_MODEL and config.EMBED_DIM come from .env</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">JINA_URL = &quot;<a href="https://api.jina.ai/v1/embeddings">https://api.jina.ai/v1/embeddings</a>&quot;</span></td><td>the web address of Jina&#x27;s embedding service</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">BATCH_SIZE = 32</span></td><td>we send at most 32 texts per request; smaller requests are less likely to time out</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">def embed(texts: list[str], task: str) -&gt; list[list[float]]:</span></td><td>the one function the rest of QueryMesh uses: give it a list of texts, get back one list of numbers per text</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">if not config.JINA_API_KEY: raise RuntimeError(...)</span></td><td>stops early with a clear message instead of a confusing 401 error from Jina</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">for start in range(0, len(texts), BATCH_SIZE):</span></td><td>walks through the texts 32 at a time: 0-31, 32-63, ...</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">batch = texts[start:start + BATCH_SIZE]</span></td><td>takes the next slice of up to 32 texts</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">httpx.post(JINA_URL, headers={&quot;Authorization&quot;: f&quot;Bearer {...}&quot;}, ...)</span></td><td>sends the request; the header proves who you are (Bearer = &quot;the holder of this key&quot;)</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">&quot;model&quot;: config.EMBED_MODEL</span></td><td>which Jina model to use (jina-embeddings-v5-text-small)</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">&quot;task&quot;: task</span></td><td>retrieval.passage when storing chunks, retrieval.query for questions (Section 3.1)</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">&quot;dimensions&quot;: config.EMBED_DIM</span></td><td>ask for 1024 numbers per text; must match the OpenSearch mapping in search.py</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">&quot;normalized&quot;: True</span></td><td>every vector gets length 1, so cosine similarity works correctly</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">timeout=120</span></td><td>wait at most 120 seconds for an answer, then fail instead of hanging forever</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">response.raise_for_status()</span></td><td>if Jina answered with an error (401, 422, 429...), raise it as a Python error you can read</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">sorted(response.json()[&quot;data&quot;], key=lambda row: row[&quot;index&quot;])</span></td><td>Jina returns one row per text with its position &quot;index&quot;; sorting guarantees vector 0 belongs to text 0</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">vectors.extend(row[&quot;embedding&quot;] for row in rows)</span></td><td>adds this batch&#x27;s vectors to the full result list</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">if __name__ == &quot;__main__&quot;:</span></td><td>this block runs only when you start the file directly with python -m, not when another file imports it</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">print(f&quot;dimensions={len(vector)} ...&quot;)</span></td><td>a quick self-test: prints how many numbers came back and the first five</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">import httpx</span></td><td>httpx is a library that sends web requests (like a browser, but from Python)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">from querymesh import config</span></td><td>reads our settings module; config.JINA_API_KEY, config.EMBED_MODEL and config.EMBED_DIM come from .env</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">JINA_URL = &quot;<a href="https://api.jina.ai/v1/embeddings">https://api.jina.ai/v1/embeddings</a>&quot;</span></td><td>the web address of Jina&#x27;s embedding service</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">BATCH_SIZE = 32</span></td><td>we send at most 32 texts per request; smaller requests are less likely to time out</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">def embed(texts: list[str], task: str) -&gt; list[list[float]]:</span></td><td>the one function the rest of QueryMesh uses: give it a list of texts, get back one list of numbers per text</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">if not config.JINA_API_KEY: raise RuntimeError(...)</span></td><td>stops early with a clear message instead of a confusing 401 error from Jina</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">for start in range(0, len(texts), BATCH_SIZE):</span></td><td>walks through the texts 32 at a time: 0-31, 32-63, ...</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">batch = texts[start:start + BATCH_SIZE]</span></td><td>takes the next slice of up to 32 texts</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">httpx.post(JINA_URL, headers={&quot;Authorization&quot;: f&quot;Bearer {...}&quot;}, ...)</span></td><td>sends the request; the header proves who you are (Bearer = &quot;the holder of this key&quot;)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">&quot;model&quot;: config.EMBED_MODEL</span></td><td>which Jina model to use (jina-embeddings-v5-text-small)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">&quot;task&quot;: task</span></td><td>retrieval.passage when storing chunks, retrieval.query for questions (Section 3.1)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">&quot;dimensions&quot;: config.EMBED_DIM</span></td><td>ask for 1024 numbers per text; must match the OpenSearch mapping in search.py</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">&quot;normalized&quot;: True</span></td><td>every vector gets length 1, so cosine similarity works correctly</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">timeout=120</span></td><td>wait at most 120 seconds for an answer, then fail instead of hanging forever</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">response.raise_for_status()</span></td><td>if Jina answered with an error (401, 422, 429...), raise it as a Python error you can read</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">sorted(response.json()[&quot;data&quot;], key=lambda row: row[&quot;index&quot;])</span></td><td>Jina returns one row per text with its position &quot;index&quot;; sorting guarantees vector 0 belongs to text 0</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">vectors.extend(row[&quot;embedding&quot;] for row in rows)</span></td><td>adds this batch&#x27;s vectors to the full result list</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">if __name__ == &quot;__main__&quot;:</span></td><td>this block runs only when you start the file directly with python -m, not when another file imports it</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">print(f&quot;dimensions={len(vector)} ...&quot;)</span></td><td>a quick self-test: prints how many numbers came back and the first five</td></tr>
 </table>
 <p><b>Step 8.</b> In the VS Code Terminal (folder ~/querymesh, venv active) run the self-test:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">python -m querymesh.embeddings</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">python -m querymesh.embeddings</pre>
 <p><b>You should see:</b> one line like dimensions=1024 first_values=[0.0123, -0.0456, 0.0311, 0.0087, -0.0219] (your numbers will be different).</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>If you see...</b></td><td style="background-color:#e0e0e0"><b>It means...</b></td><td style="background-color:#e0e0e0"><b>Do this next</b></td></tr>
@@ -105,7 +105,7 @@ if __name__ == &quot;__main__&quot;:
 <tr><td>httpx.HTTPStatusError: 401</td><td>the key is wrong or has a space at the end</td><td>copy the key again from the Jina page (Steps 1-6)</td></tr>
 <tr><td>httpx.HTTPStatusError: 422 or 400 mentioning task or model</td><td>the model name or task is not accepted</td><td>in .env set EMBED_MODEL=jina-embeddings-v3 (also 1024 dims), save, run Step 8 again</td></tr>
 <tr><td>httpx.HTTPStatusError: 429</td><td>too many requests per minute on the free tier</td><td>wait one minute and run again</td></tr>
-<tr><td>ModuleNotFoundError: No module named &#x27;querymesh&#x27;</td><td>the venv is not active or you are not in ~/querymesh</td><td>run <span style="font-family:'Roboto Mono'">cd ~/querymesh &amp;&amp; source .venv/bin/activate</span></td></tr>
+<tr><td>ModuleNotFoundError: No module named &#x27;querymesh&#x27;</td><td>the venv is not active or you are not in ~/querymesh</td><td>run <span style="font-family:'Roboto Mono',monospace">cd ~/querymesh &amp;&amp; source .venv/bin/activate</span></td></tr>
 </table>
 <p><b style="color:#1a7333">CHECKPOINT:</b> the self-test prints dimensions=1024.</p>
 <p><b>If not:</b> use the branch table above; the most common cause is a key with a trailing space.</p>
@@ -115,7 +115,7 @@ if __name__ == &quot;__main__&quot;:
 <p><b>Step 1.</b> Create the file querymesh/search.py (right-click querymesh &gt; New File... &gt; search.py &gt; Enter).</p>
 <p><b>Step 2.</b> Paste the grey box below.</p>
 <p><b>Step 3.</b> Press Ctrl+S.</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;OpenSearch: create the index, store chunks, and run hybrid (BM25 + vector + RRF) search.&quot;&quot;&quot;
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;OpenSearch: create the index, store chunks, and run hybrid (BM25 + vector + RRF) search.&quot;&quot;&quot;
 import sys
 
 from opensearchpy import OpenSearch, helpers
@@ -213,61 +213,61 @@ if __name__ == &quot;__main__&quot;:
             print(&quot;    &quot; + hit[&quot;text&quot;][:160].replace(&quot;\n&quot;, &quot; &quot;))</pre>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">from opensearchpy import OpenSearch, helpers</span></td><td>the official OpenSearch Python client; helpers contains the fast &quot;bulk&quot; upload</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">from querymesh.embeddings import embed</span></td><td>re-uses the function from Section 4.1</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">client = OpenSearch(hosts=[config.OPENSEARCH_URL], timeout=60)</span></td><td>one connection object to <a href="http://localhost:9200">http://localhost:9200</a>, shared by every function in this file</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">INDEX_BODY = {...}</span></td><td>the &quot;table design&quot; of our index: settings + the type of every field</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">&quot;index&quot;: {&quot;knn&quot;: True, ...}</span></td><td>switches on vector (k-NN) search for this index</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">&quot;number_of_shards&quot;: 1, &quot;number_of_replicas&quot;: 0</span></td><td>one piece, no copies: right for a single-node OpenSearch (a replica would have no second node to live on, and the index would stay yellow)</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">&quot;chunk_id&quot;: {&quot;type&quot;: &quot;keyword&quot;}</span></td><td>keyword = stored exactly, not split into words; used as an ID, for example 2510.01234v1-7</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">&quot;paper_id&quot;: {&quot;type&quot;: &quot;keyword&quot;}</span></td><td>the arXiv ID; exact matching lets us check &quot;is this paper already indexed?&quot;</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">&quot;title&quot;: {&quot;type&quot;: &quot;text&quot;}</span></td><td>text = split into words for BM25 search</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">&quot;authors&quot;: {&quot;type&quot;: &quot;keyword&quot;}</span></td><td>author names stored exactly (a list is fine)</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">&quot;published&quot;: {&quot;type&quot;: &quot;date&quot;}</span></td><td>the publication date, stored as a real date so you could filter &quot;newer than&quot;</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">&quot;text&quot;: {&quot;type&quot;: &quot;text&quot;, &quot;analyzer&quot;: &quot;english&quot;}</span></td><td>the chunk text for BM25; the english analyzer also matches word forms (ranking, ranked, rank)</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">&quot;embedding&quot;: {&quot;type&quot;: &quot;knn_vector&quot;, &quot;dimension&quot;: config.EMBED_DIM, ...}</span></td><td>the vector field: exactly 1024 numbers per chunk</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">&quot;method&quot;: {&quot;name&quot;: &quot;hnsw&quot;, &quot;engine&quot;: &quot;lucene&quot;, &quot;space_type&quot;: &quot;cosinesimil&quot;}</span></td><td>HNSW is a fast graph index for &quot;find the nearest vectors&quot;; lucene is the built-in engine; cosinesimil compares directions (meaning)</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">PIPELINE_BODY = {...}</span></td><td>the search pipeline: runs after both searches and merges their lists</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">&quot;score-ranker-processor&quot;: {&quot;combination&quot;: {&quot;technique&quot;: &quot;rrf&quot;, &quot;rank_constant&quot;: 60}}</span></td><td>Reciprocal Rank Fusion with k = 60, exactly the formula of Section 3.3 [15]</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">def setup() -&gt; None:</span></td><td>creates the index (only if it does not exist yet) and the pipeline; safe to run many times</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">client.indices.exists(...)</span> / <span style="font-family:'Roboto Mono'">client.indices.create(...)</span></td><td>&quot;does the index exist?&quot; and &quot;create it with INDEX_BODY&quot;</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">client.transport.perform_request(&quot;PUT&quot;, f&quot;/_search/pipeline/{...}&quot;, body=PIPELINE_BODY)</span></td><td>sends the raw REST call PUT /_search/pipeline/querymesh-rrf; PUT replaces any old version, so re-running is harmless</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">def paper_exists(paper_id)</span></td><td>counts chunks with this paper_id; more than 0 means &quot;already indexed, skip it&quot;</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">def index_chunks(chunks)</span></td><td>embeds every chunk and stores it, all in one bulk request</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">from opensearchpy import OpenSearch, helpers</span></td><td>the official OpenSearch Python client; helpers contains the fast &quot;bulk&quot; upload</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">from querymesh.embeddings import embed</span></td><td>re-uses the function from Section 4.1</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">client = OpenSearch(hosts=[config.OPENSEARCH_URL], timeout=60)</span></td><td>one connection object to <a href="http://localhost:9200">http://localhost:9200</a>, shared by every function in this file</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">INDEX_BODY = {...}</span></td><td>the &quot;table design&quot; of our index: settings + the type of every field</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">&quot;index&quot;: {&quot;knn&quot;: True, ...}</span></td><td>switches on vector (k-NN) search for this index</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">&quot;number_of_shards&quot;: 1, &quot;number_of_replicas&quot;: 0</span></td><td>one piece, no copies: right for a single-node OpenSearch (a replica would have no second node to live on, and the index would stay yellow)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">&quot;chunk_id&quot;: {&quot;type&quot;: &quot;keyword&quot;}</span></td><td>keyword = stored exactly, not split into words; used as an ID, for example 2510.01234v1-7</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">&quot;paper_id&quot;: {&quot;type&quot;: &quot;keyword&quot;}</span></td><td>the arXiv ID; exact matching lets us check &quot;is this paper already indexed?&quot;</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">&quot;title&quot;: {&quot;type&quot;: &quot;text&quot;}</span></td><td>text = split into words for BM25 search</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">&quot;authors&quot;: {&quot;type&quot;: &quot;keyword&quot;}</span></td><td>author names stored exactly (a list is fine)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">&quot;published&quot;: {&quot;type&quot;: &quot;date&quot;}</span></td><td>the publication date, stored as a real date so you could filter &quot;newer than&quot;</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">&quot;text&quot;: {&quot;type&quot;: &quot;text&quot;, &quot;analyzer&quot;: &quot;english&quot;}</span></td><td>the chunk text for BM25; the english analyzer also matches word forms (ranking, ranked, rank)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">&quot;embedding&quot;: {&quot;type&quot;: &quot;knn_vector&quot;, &quot;dimension&quot;: config.EMBED_DIM, ...}</span></td><td>the vector field: exactly 1024 numbers per chunk</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">&quot;method&quot;: {&quot;name&quot;: &quot;hnsw&quot;, &quot;engine&quot;: &quot;lucene&quot;, &quot;space_type&quot;: &quot;cosinesimil&quot;}</span></td><td>HNSW is a fast graph index for &quot;find the nearest vectors&quot;; lucene is the built-in engine; cosinesimil compares directions (meaning)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">PIPELINE_BODY = {...}</span></td><td>the search pipeline: runs after both searches and merges their lists</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">&quot;score-ranker-processor&quot;: {&quot;combination&quot;: {&quot;technique&quot;: &quot;rrf&quot;, &quot;rank_constant&quot;: 60}}</span></td><td>Reciprocal Rank Fusion with k = 60, exactly the formula of Section 3.3 [15]</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">def setup() -&gt; None:</span></td><td>creates the index (only if it does not exist yet) and the pipeline; safe to run many times</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">client.indices.exists(...)</span> / <span style="font-family:'Roboto Mono',monospace">client.indices.create(...)</span></td><td>&quot;does the index exist?&quot; and &quot;create it with INDEX_BODY&quot;</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">client.transport.perform_request(&quot;PUT&quot;, f&quot;/_search/pipeline/{...}&quot;, body=PIPELINE_BODY)</span></td><td>sends the raw REST call PUT /_search/pipeline/querymesh-rrf; PUT replaces any old version, so re-running is harmless</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">def paper_exists(paper_id)</span></td><td>counts chunks with this paper_id; more than 0 means &quot;already indexed, skip it&quot;</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">def index_chunks(chunks)</span></td><td>embeds every chunk and stores it, all in one bulk request</td></tr>
 <tr><td>`embed([c[&quot;title&quot;] + &quot;<br>&quot; + c[&quot;text&quot;] for c in chunks], &quot;retrieval.passage&quot;)`</td><td>the vector is made from title + text, so a chunk &quot;knows&quot; which paper it is from; task retrieval.passage because these are documents</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">{&quot;_index&quot;: ..., &quot;_id&quot;: c[&quot;chunk_id&quot;], &quot;_source&quot;: {**c, &quot;embedding&quot;: v}}</span></td><td>one bulk action per chunk; _id = chunk_id, so indexing the same chunk twice overwrites instead of duplicating</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">helpers.bulk(client, actions, refresh=True)</span></td><td>uploads all chunks in one request; refresh=True makes them searchable immediately</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">def hybrid_search(query, k=config.TOP_K)</span></td><td>returns the best k chunks (8 by default) for a question</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">vector = embed([query], &quot;retrieval.query&quot;)[0]</span></td><td>the question becomes a vector, with the query task</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">&quot;_source&quot;: {&quot;excludes&quot;: [&quot;embedding&quot;]}</span></td><td>do not send the 1024 numbers back; we only need the text and metadata</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">&quot;hybrid&quot;: {&quot;queries&quot;: [...]}</span></td><td>run two searches on the same request [14]</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">{&quot;multi_match&quot;: {&quot;query&quot;: query, &quot;fields&quot;: [&quot;title^2&quot;, &quot;text&quot;]}}</span></td><td>search 1, BM25: words in the title count double (^2)</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">{&quot;knn&quot;: {&quot;embedding&quot;: {&quot;vector&quot;: vector, &quot;k&quot;: k * 5}}}</span></td><td>search 2, vectors: the 40 nearest chunks, so RRF has enough candidates to merge</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">params={&quot;search_pipeline&quot;: config.SEARCH_PIPELINE}</span></td><td>tells OpenSearch to merge the two lists with our RRF pipeline</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">[{**hit[&quot;_source&quot;], &quot;score&quot;: hit[&quot;_score&quot;]} for hit in ...]</span></td><td>turns each result into a simple dictionary and adds its RRF score</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">if sys.argv[1:] == [&quot;setup&quot;]:</span></td><td>python -m querymesh.search setup creates index + pipeline; any other words are treated as a question</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">{&quot;_index&quot;: ..., &quot;_id&quot;: c[&quot;chunk_id&quot;], &quot;_source&quot;: {**c, &quot;embedding&quot;: v}}</span></td><td>one bulk action per chunk; _id = chunk_id, so indexing the same chunk twice overwrites instead of duplicating</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">helpers.bulk(client, actions, refresh=True)</span></td><td>uploads all chunks in one request; refresh=True makes them searchable immediately</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">def hybrid_search(query, k=config.TOP_K)</span></td><td>returns the best k chunks (8 by default) for a question</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">vector = embed([query], &quot;retrieval.query&quot;)[0]</span></td><td>the question becomes a vector, with the query task</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">&quot;_source&quot;: {&quot;excludes&quot;: [&quot;embedding&quot;]}</span></td><td>do not send the 1024 numbers back; we only need the text and metadata</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">&quot;hybrid&quot;: {&quot;queries&quot;: [...]}</span></td><td>run two searches on the same request [14]</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">{&quot;multi_match&quot;: {&quot;query&quot;: query, &quot;fields&quot;: [&quot;title^2&quot;, &quot;text&quot;]}}</span></td><td>search 1, BM25: words in the title count double (^2)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">{&quot;knn&quot;: {&quot;embedding&quot;: {&quot;vector&quot;: vector, &quot;k&quot;: k * 5}}}</span></td><td>search 2, vectors: the 40 nearest chunks, so RRF has enough candidates to merge</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">params={&quot;search_pipeline&quot;: config.SEARCH_PIPELINE}</span></td><td>tells OpenSearch to merge the two lists with our RRF pipeline</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">[{**hit[&quot;_source&quot;], &quot;score&quot;: hit[&quot;_score&quot;]} for hit in ...]</span></td><td>turns each result into a simple dictionary and adds its RRF score</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">if sys.argv[1:] == [&quot;setup&quot;]:</span></td><td>python -m querymesh.search setup creates index + pipeline; any other words are treated as a question</td></tr>
 </table>
 <p><b>Step 4.</b> Create the index and the pipeline:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">python -m querymesh.search setup</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">python -m querymesh.search setup</pre>
 <p><b>You should see:</b></p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">created index arxiv-chunks
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">created index arxiv-chunks
 search pipeline querymesh-rrf is ready</pre>
 <p><b>Step 5.</b> Run the same command a second time:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">python -m querymesh.search setup</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">python -m querymesh.search setup</pre>
 <p><b>You should see:</b> only search pipeline querymesh-rrf is ready (the index already exists, so it is not created again).</p>
 <p><b>Step 6.</b> Check the vector field in OpenSearch:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:9200/arxiv-chunks/_mapping | jq &#x27;.[&quot;arxiv-chunks&quot;].mappings.properties.embedding&#x27;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:9200/arxiv-chunks/_mapping | jq &#x27;.[&quot;arxiv-chunks&quot;].mappings.properties.embedding&#x27;</pre>
 <p><b>You should see:</b> &quot;type&quot;: &quot;knn_vector&quot; and &quot;dimension&quot;: 1024 with the hnsw method.</p>
 <p><b>Step 7.</b> Check the pipeline:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:9200/_search/pipeline/querymesh-rrf | jq &#x27;.[&quot;querymesh-rrf&quot;].phase_results_processors&#x27;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:9200/_search/pipeline/querymesh-rrf | jq &#x27;.[&quot;querymesh-rrf&quot;].phase_results_processors&#x27;</pre>
 <p><b>You should see:</b> a list with &quot;score-ranker-processor&quot; and &quot;technique&quot;: &quot;rrf&quot;.</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>If you see...</b></td><td style="background-color:#e0e0e0"><b>It means...</b></td><td style="background-color:#e0e0e0"><b>Do this next</b></td></tr>
-<tr><td>ConnectionError ... localhost:9200</td><td>OpenSearch is not running</td><td>run <span style="font-family:'Roboto Mono'">bash scripts/start_opensearch.sh</span>, wait 30 seconds, <span style="font-family:'Roboto Mono'">curl -s localhost:9200</span></td></tr>
-<tr><td>an error that mentions score-ranker-processor is unknown</td><td>OpenSearch older than 2.19</td><td>check <span style="font-family:'Roboto Mono'">curl -s localhost:9200 | jq -r .version.number</span>; it must be 3.9.0 (Section 2B.11)</td></tr>
+<tr><td>ConnectionError ... localhost:9200</td><td>OpenSearch is not running</td><td>run <span style="font-family:'Roboto Mono',monospace">bash scripts/start_opensearch.sh</span>, wait 30 seconds, <span style="font-family:'Roboto Mono',monospace">curl -s localhost:9200</span></td></tr>
+<tr><td>an error that mentions score-ranker-processor is unknown</td><td>OpenSearch older than 2.19</td><td>check <span style="font-family:'Roboto Mono',monospace">curl -s localhost:9200 | jq -r .version.number</span>; it must be 3.9.0 (Section 2B.11)</td></tr>
 <tr><td>resource_already_exists_exception</td><td>two setups ran at the same time</td><td>ignore it; run Step 5 once more</td></tr>
 </table>
-<p><b style="color:#bf1a1a">Watch out:</b> if you later change EMBED_DIM or EMBED_MODEL, the old vectors no longer fit. Delete the index with <span style="font-family:'Roboto Mono'">curl -s -X DELETE localhost:9200/arxiv-chunks</span>, run Step 4 again and re-ingest (Section 4.5).</p>
+<p><b style="color:#bf1a1a">Watch out:</b> if you later change EMBED_DIM or EMBED_MODEL, the old vectors no longer fit. Delete the index with <span style="font-family:'Roboto Mono',monospace">curl -s -X DELETE localhost:9200/arxiv-chunks</span>, run Step 4 again and re-ingest (Section 4.5).</p>
 <p><b style="color:#1a7333">CHECKPOINT:</b> Step 6 shows dimension 1024 and Step 7 shows rrf.</p>
 <p><b>If not:</b> read the branch table; 9 out of 10 times OpenSearch is simply not running.</p>
 <h2>SECTION 4.3 - Create querymesh/ingest.py (the ingestion pipeline)</h2>
@@ -276,7 +276,7 @@ search pipeline querymesh-rrf is ready</pre>
 <p><b>Step 1.</b> Create the file querymesh/ingest.py (right-click querymesh &gt; New File... &gt; ingest.py &gt; Enter).</p>
 <p><b>Step 2.</b> Paste the grey box below.</p>
 <p><b>Step 3.</b> Press Ctrl+S.</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;Ingestion: arXiv API -&gt; PDF -&gt; Docling -&gt; chunks -&gt; Jina vectors -&gt; OpenSearch (+ S3 copy).&quot;&quot;&quot;
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;Ingestion: arXiv API -&gt; PDF -&gt; Docling -&gt; chunks -&gt; Jina vectors -&gt; OpenSearch (+ S3 copy).&quot;&quot;&quot;
 import argparse
 import re
 from pathlib import Path
@@ -406,44 +406,44 @@ if __name__ == &quot;__main__&quot;:
     print(run(args.query, args.max_papers))</pre>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">import arxiv</span></td><td>the arxiv package (version 4.0.1) talks to the arXiv API at export.arxiv.org for us [11]</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">import boto3</span></td><td>the AWS library for Python; it talks to S3 on FakeCloud or on real AWS</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">DATA_DIR = Path(&quot;data/pdfs&quot;)</span></td><td>downloaded PDFs are kept in ~/querymesh/data/pdfs (the folder is in .gitignore)</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">CHUNK_CHARS = 1500</span> and <span style="font-family:'Roboto Mono'">OVERLAP_CHARS = 200</span></td><td>chunk size and overlap from Section 3.4</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">_converter = None</span></td><td>Docling takes several seconds to load its models, so we load it once and keep it in this variable</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">arxiv.Client(page_size=..., delay_seconds=3.0, num_retries=3)</span></td><td>arXiv allows one request every 3 seconds [10]; the client waits for us and retries 3 times on network errors</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">arxiv.Search(query=query, max_results=max_papers, sort_by=arxiv.SortCriterion.SubmittedDate)</span></td><td>&quot;newest first&quot;; query uses arXiv syntax such as cat:cs.CL AND abs:retrieval (category Computation and Language, abstract contains retrieval)</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">result.get_short_id()</span></td><td>the arXiv ID with version, for example 2510.01234v1</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">&quot; &quot;.join(result.title.split())</span></td><td>removes line breaks and double spaces that arXiv titles often contain</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">[a.name for a in result.authors][:10]</span></td><td>author names, at most 10 (some papers have hundreds)</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">result.published.date().isoformat()</span></td><td>the date as text 2026-10-20, which OpenSearch stores as a date</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">&quot;pdf_url&quot;: result.pdf_url</span></td><td>where the PDF can be downloaded</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">&quot;summary&quot;: ...</span></td><td>the abstract; the Scout agent indexes only this (fast path)</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">def download_pdf(paper)</span></td><td>downloads the PDF once into data/pdfs; if the file already exists it is not downloaded again</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">paper[&#x27;paper_id&#x27;].replace(&#x27;/&#x27;, &#x27;_&#x27;)</span></td><td>very old arXiv IDs contain a slash (hep-th/9901001), which is not allowed in a file name</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">httpx.get(..., follow_redirects=True, timeout=120)</span></td><td>arXiv redirects PDF links; follow_redirects follows them to the real file</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">def pdf_to_markdown(path)</span></td><td>PDF in, Markdown text out</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">from docling... import ...</span> (inside the function)</td><td>Docling is imported only when it is really needed; the API and the agents never parse PDFs, so they start fast and do not need Docling installed</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">PdfPipelineOptions(do_ocr=False, do_table_structure=True)</span></td><td>arXiv PDFs already contain real text, so OCR (reading pixels) is switched off: much faster; tables are still recognised</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">DocumentConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)})</span></td><td>a converter that uses those options for PDF files</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">_converter.convert(str(path)).document.export_to_markdown()</span></td><td>parse the PDF and return Markdown with # headings, paragraphs and tables [12]</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">import arxiv</span></td><td>the arxiv package (version 4.0.1) talks to the arXiv API at export.arxiv.org for us [11]</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">import boto3</span></td><td>the AWS library for Python; it talks to S3 on FakeCloud or on real AWS</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">DATA_DIR = Path(&quot;data/pdfs&quot;)</span></td><td>downloaded PDFs are kept in ~/querymesh/data/pdfs (the folder is in .gitignore)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">CHUNK_CHARS = 1500</span> and <span style="font-family:'Roboto Mono',monospace">OVERLAP_CHARS = 200</span></td><td>chunk size and overlap from Section 3.4</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">_converter = None</span></td><td>Docling takes several seconds to load its models, so we load it once and keep it in this variable</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">arxiv.Client(page_size=..., delay_seconds=3.0, num_retries=3)</span></td><td>arXiv allows one request every 3 seconds [10]; the client waits for us and retries 3 times on network errors</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">arxiv.Search(query=query, max_results=max_papers, sort_by=arxiv.SortCriterion.SubmittedDate)</span></td><td>&quot;newest first&quot;; query uses arXiv syntax such as cat:cs.CL AND abs:retrieval (category Computation and Language, abstract contains retrieval)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">result.get_short_id()</span></td><td>the arXiv ID with version, for example 2510.01234v1</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">&quot; &quot;.join(result.title.split())</span></td><td>removes line breaks and double spaces that arXiv titles often contain</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">[a.name for a in result.authors][:10]</span></td><td>author names, at most 10 (some papers have hundreds)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">result.published.date().isoformat()</span></td><td>the date as text 2026-10-20, which OpenSearch stores as a date</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">&quot;pdf_url&quot;: result.pdf_url</span></td><td>where the PDF can be downloaded</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">&quot;summary&quot;: ...</span></td><td>the abstract; the Scout agent indexes only this (fast path)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">def download_pdf(paper)</span></td><td>downloads the PDF once into data/pdfs; if the file already exists it is not downloaded again</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">paper[&#x27;paper_id&#x27;].replace(&#x27;/&#x27;, &#x27;_&#x27;)</span></td><td>very old arXiv IDs contain a slash (hep-th/9901001), which is not allowed in a file name</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">httpx.get(..., follow_redirects=True, timeout=120)</span></td><td>arXiv redirects PDF links; follow_redirects follows them to the real file</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">def pdf_to_markdown(path)</span></td><td>PDF in, Markdown text out</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">from docling... import ...</span> (inside the function)</td><td>Docling is imported only when it is really needed; the API and the agents never parse PDFs, so they start fast and do not need Docling installed</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">PdfPipelineOptions(do_ocr=False, do_table_structure=True)</span></td><td>arXiv PDFs already contain real text, so OCR (reading pixels) is switched off: much faster; tables are still recognised</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">DocumentConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)})</span></td><td>a converter that uses those options for PDF files</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">_converter.convert(str(path)).document.export_to_markdown()</span></td><td>parse the PDF and return Markdown with # headings, paragraphs and tables [12]</td></tr>
 <tr><td>`markdown.split(&quot;<br>## References&quot;)[0]`</td><td>keeps only the text before the References heading</td></tr>
 <tr><td>`re.split(r&quot;<br>(?=#{1,3} )&quot;, markdown)`</td><td>cuts the text in front of every heading line that starts with #, ## or ### (the heading stays with its section)</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">while start &lt; len(section):</span> ... <span style="font-family:'Roboto Mono'">start += CHUNK_CHARS - OVERLAP_CHARS</span></td><td>moves a 1,500-character window forward by 1,300 characters each time, so neighbouring chunks share 200 characters</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">if len(piece) &gt; 100:</span></td><td>ignores tiny leftovers such as a lonely page number</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">def upload_pdf(path)</span></td><td>copies the PDF to s3://PAPERS_BUCKET/pdfs/FILE.pdf</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">if config.PAPERS_BUCKET:</span></td><td>if PAPERS_BUCKET is empty in .env, the upload is skipped (useful if you have no S3 at all)</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">boto3.client(&quot;s3&quot;).upload_file(...)</span></td><td>boto3 reads AWS_ENDPOINT_URL and the keys from the environment (the AWS_ lines of .env): FakeCloud when they are there, real AWS when they are removed</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">def make_chunks(paper, texts)</span></td><td>glues the paper&#x27;s metadata onto every chunk and gives each chunk the id PAPERID-NUMBER</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">def ingest_full_text(query, max_papers)</span></td><td>the nightly job: setup, fetch, skip known papers, download, parse, chunk, index, upload</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">if search.paper_exists(paper[&quot;paper_id&quot;]): skipped.append(...); continue</span></td><td>papers that are already in the index are not processed again; this makes the job safe to re-run</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">print(f&quot;indexed {paper[&#x27;paper_id&#x27;]}: {count} chunks ...&quot;)</span></td><td>one progress line per new paper</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">def ingest_abstracts(query, max_papers)</span></td><td>the fast path for the Scout agent: one chunk per paper made from the abstract only, no PDF, no Docling (seconds instead of minutes)</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">argparse.ArgumentParser(...)</span></td><td>turns command-line options into Python values</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">--query</span>, <span style="font-family:'Roboto Mono'">--max-papers</span>, <span style="font-family:'Roboto Mono'">--abstracts-only</span></td><td>what to search on arXiv, how many papers, and whether to use the fast path</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">run = ingest_abstracts if args.abstracts_only else ingest_full_text</span></td><td>picks the function, then runs it and prints the result dictionary</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">while start &lt; len(section):</span> ... <span style="font-family:'Roboto Mono',monospace">start += CHUNK_CHARS - OVERLAP_CHARS</span></td><td>moves a 1,500-character window forward by 1,300 characters each time, so neighbouring chunks share 200 characters</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">if len(piece) &gt; 100:</span></td><td>ignores tiny leftovers such as a lonely page number</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">def upload_pdf(path)</span></td><td>copies the PDF to s3://PAPERS_BUCKET/pdfs/FILE.pdf</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">if config.PAPERS_BUCKET:</span></td><td>if PAPERS_BUCKET is empty in .env, the upload is skipped (useful if you have no S3 at all)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">boto3.client(&quot;s3&quot;).upload_file(...)</span></td><td>boto3 reads AWS_ENDPOINT_URL and the keys from the environment (the AWS_ lines of .env): FakeCloud when they are there, real AWS when they are removed</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">def make_chunks(paper, texts)</span></td><td>glues the paper&#x27;s metadata onto every chunk and gives each chunk the id PAPERID-NUMBER</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">def ingest_full_text(query, max_papers)</span></td><td>the nightly job: setup, fetch, skip known papers, download, parse, chunk, index, upload</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">if search.paper_exists(paper[&quot;paper_id&quot;]): skipped.append(...); continue</span></td><td>papers that are already in the index are not processed again; this makes the job safe to re-run</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">print(f&quot;indexed {paper[&#x27;paper_id&#x27;]}: {count} chunks ...&quot;)</span></td><td>one progress line per new paper</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">def ingest_abstracts(query, max_papers)</span></td><td>the fast path for the Scout agent: one chunk per paper made from the abstract only, no PDF, no Docling (seconds instead of minutes)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">argparse.ArgumentParser(...)</span></td><td>turns command-line options into Python values</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">--query</span>, <span style="font-family:'Roboto Mono',monospace">--max-papers</span>, <span style="font-family:'Roboto Mono',monospace">--abstracts-only</span></td><td>what to search on arXiv, how many papers, and whether to use the fast path</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">run = ingest_abstracts if args.abstracts_only else ingest_full_text</span></td><td>picks the function, then runs it and prints the result dictionary</td></tr>
 </table>
-<p><b style="color:#1a7333">CHECKPOINT:</b> <span style="font-family:'Roboto Mono'">python -c &quot;import querymesh.ingest; print(&#x27;ok&#x27;)&quot;</span> prints ok.</p>
+<p><b style="color:#1a7333">CHECKPOINT:</b> <span style="font-family:'Roboto Mono',monospace">python -c &quot;import querymesh.ingest; print(&#x27;ok&#x27;)&quot;</span> prints ok.</p>
 <p><b>If not:</b> a SyntaxError means the paste was incomplete; delete the file content (Ctrl+A, Delete), paste again, Ctrl+S.</p>
 <h2>SECTION 4.4 - Create the S3 bucket for the PDFs (FakeCloud first, then real AWS)</h2>
 <p><b>WHERE:</b> VS Code Terminal, folder ~/querymesh</p>
@@ -452,47 +452,47 @@ if __name__ == &quot;__main__&quot;:
 <p><b>Step 1.</b> Do every row of the table below in YOUR column. Do the white FakeCloud column first. Do the light-blue column only when you decide to use real AWS.</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Step</b></td><td style="background-color:#e0e0e0"><b>FakeCloud (free practice)</b></td><td style="background-color:#9fc5e8"><b>Real AWS (same step)</b></td></tr>
-<tr><td>1 Target</td><td><span style="font-family:'Roboto Mono'">source scripts/use_fakecloud.sh</span></td><td style="background-color:#cfe2f3"><span style="font-family:'Roboto Mono'">source scripts/use_aws.sh</span></td></tr>
-<tr><td>2 Who am I</td><td><span style="font-family:'Roboto Mono'">aws sts get-caller-identity --query Account --output text</span><br><b>You should see:</b> 123456789012</td><td style="background-color:#cfe2f3">same command<br><b>You should see:</b> your real 12-digit account ID. Write it down as ACCOUNT_ID</td></tr>
-<tr><td>3 Bucket name</td><td><span style="font-family:'Roboto Mono'">export BUCKET=querymesh-papers</span></td><td style="background-color:#cfe2f3"><span style="font-family:'Roboto Mono'">export BUCKET=querymesh-papers-ACCOUNT_ID</span><br>(S3 names are global: nobody else may own the same name, so we add your account ID)</td></tr>
-<tr><td>4 Create bucket</td><td><span style="font-family:'Roboto Mono'">aws s3 mb s3://<span style="font-family:'Roboto Mono'">$</span>BUCKET</span></td><td style="background-color:#cfe2f3">same command<br><b>You should see:</b> make_bucket: querymesh-papers-123456789012</td></tr>
-<tr><td>5 Block public access</td><td>not needed (FakeCloud is only on your VM)</td><td style="background-color:#cfe2f3"><span style="font-family:'Roboto Mono'">aws s3api put-public-access-block --bucket <span style="font-family:'Roboto Mono'">$</span>BUCKET --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true</span></td></tr>
-<tr><td>6 Check</td><td><span style="font-family:'Roboto Mono'">aws s3 ls</span></td><td style="background-color:#cfe2f3">same command; console: S3 &gt; Buckets shows the bucket</td></tr>
-<tr><td>7 .env for Python</td><td>keep these 4 lines in .env exactly:<br><span style="font-family:'Roboto Mono'">AWS_ENDPOINT_URL=<a href="http://localhost:4566">http://localhost:4566</a></span><br><span style="font-family:'Roboto Mono'">AWS_ACCESS_KEY_ID=test</span><br><span style="font-family:'Roboto Mono'">AWS_SECRET_ACCESS_KEY=test</span><br><span style="font-family:'Roboto Mono'">AWS_DEFAULT_REGION=us-east-1</span><br>and <span style="font-family:'Roboto Mono'">PAPERS_BUCKET=querymesh-papers</span></td><td style="background-color:#cfe2f3">DELETE the 4 AWS_ lines from .env (boto3 then uses the keys you saved with aws configure in Section 2B.12)<br>and set <span style="font-family:'Roboto Mono'">PAPERS_BUCKET=querymesh-papers-ACCOUNT_ID</span></td></tr>
+<tr><td>1 Target</td><td><span style="font-family:'Roboto Mono',monospace">source scripts/use_fakecloud.sh</span></td><td style="background-color:#cfe2f3"><span style="font-family:'Roboto Mono',monospace">source scripts/use_aws.sh</span></td></tr>
+<tr><td>2 Who am I</td><td><span style="font-family:'Roboto Mono',monospace">aws sts get-caller-identity --query Account --output text</span><br><b>You should see:</b> 123456789012</td><td style="background-color:#cfe2f3">same command<br><b>You should see:</b> your real 12-digit account ID. Write it down as ACCOUNT_ID</td></tr>
+<tr><td>3 Bucket name</td><td><span style="font-family:'Roboto Mono',monospace">export BUCKET=querymesh-papers</span></td><td style="background-color:#cfe2f3"><span style="font-family:'Roboto Mono',monospace">export BUCKET=querymesh-papers-ACCOUNT_ID</span><br>(S3 names are global: nobody else may own the same name, so we add your account ID)</td></tr>
+<tr><td>4 Create bucket</td><td><span style="font-family:'Roboto Mono',monospace">aws s3 mb s3://<span style="font-family:'Roboto Mono',monospace">$</span>BUCKET</span></td><td style="background-color:#cfe2f3">same command<br><b>You should see:</b> make_bucket: querymesh-papers-123456789012</td></tr>
+<tr><td>5 Block public access</td><td>not needed (FakeCloud is only on your VM)</td><td style="background-color:#cfe2f3"><span style="font-family:'Roboto Mono',monospace">aws s3api put-public-access-block --bucket <span style="font-family:'Roboto Mono',monospace">$</span>BUCKET --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true</span></td></tr>
+<tr><td>6 Check</td><td><span style="font-family:'Roboto Mono',monospace">aws s3 ls</span></td><td style="background-color:#cfe2f3">same command; console: S3 &gt; Buckets shows the bucket</td></tr>
+<tr><td>7 .env for Python</td><td>keep these 4 lines in .env exactly:<br><span style="font-family:'Roboto Mono',monospace">AWS_ENDPOINT_URL=<a href="http://localhost:4566">http://localhost:4566</a></span><br><span style="font-family:'Roboto Mono',monospace">AWS_ACCESS_KEY_ID=test</span><br><span style="font-family:'Roboto Mono',monospace">AWS_SECRET_ACCESS_KEY=test</span><br><span style="font-family:'Roboto Mono',monospace">AWS_DEFAULT_REGION=us-east-1</span><br>and <span style="font-family:'Roboto Mono',monospace">PAPERS_BUCKET=querymesh-papers</span></td><td style="background-color:#cfe2f3">DELETE the 4 AWS_ lines from .env (boto3 then uses the keys you saved with aws configure in Section 2B.12)<br>and set <span style="font-family:'Roboto Mono',monospace">PAPERS_BUCKET=querymesh-papers-ACCOUNT_ID</span></td></tr>
 <tr><td>8 Save</td><td>Ctrl+S in .env</td><td style="background-color:#cfe2f3">Ctrl+S in .env</td></tr>
-<tr><td>Cost</td><td>US<span style="font-family:'Roboto Mono'">$</span>0</td><td style="background-color:#cfe2f3">S3 Standard about US<span style="font-family:'Roboto Mono'">$</span>0.023 per GB-month; 100 PDFs are about 0.2 GB, so less than 1 cent per month (verify on the S3 pricing page)</td></tr>
+<tr><td>Cost</td><td>US<span style="font-family:'Roboto Mono',monospace">$</span>0</td><td style="background-color:#cfe2f3">S3 Standard about US<span style="font-family:'Roboto Mono',monospace">$</span>0.023 per GB-month; 100 PDFs are about 0.2 GB, so less than 1 cent per month (verify on the S3 pricing page)</td></tr>
 <tr><td>Placeholder</td><td>Replace with</td><td style="background-color:#cfe2f3">Example</td></tr>
 <tr><td>ACCOUNT_ID</td><td>the 12-digit number from row 2 of the blue column</td><td style="background-color:#cfe2f3">123456789012</td></tr>
 </table>
-<p><b style="color:#bf1a1a">Watch out:</b> <span style="font-family:'Roboto Mono'">source scripts/use_fakecloud.sh</span> changes only the CURRENT terminal (the aws command). Python reads the AWS_ lines from .env instead. Both must point at the same place, otherwise the CLI looks in FakeCloud while Python uploads to AWS (or the other way round).</p>
+<p><b style="color:#bf1a1a">Watch out:</b> <span style="font-family:'Roboto Mono',monospace">source scripts/use_fakecloud.sh</span> changes only the CURRENT terminal (the aws command). Python reads the AWS_ lines from .env instead. Both must point at the same place, otherwise the CLI looks in FakeCloud while Python uploads to AWS (or the other way round).</p>
 <p><b style="color:#bf1a1a">Watch out:</b> never put real AWS keys into .env; real AWS uses the credentials file that aws configure created in ~/.aws/.</p>
-<p><b style="color:#1a7333">CHECKPOINT:</b> <span style="font-family:'Roboto Mono'">aws s3 ls</span> (in your column&#x27;s target) lists your bucket, and .env has the PAPERS_BUCKET line for the same target.</p>
-<p><b>If not:</b> &quot;Could not connect to the endpoint URL <a href="http://localhost:4566">http://localhost:4566</a>&quot; = FakeCloud is not running: <span style="font-family:'Roboto Mono'">nohup fakecloud --storage-mode persistent --data-path ~/fakecloud-data &gt; ~/fakecloud.log 2&gt;&amp;1 &amp;</span>, wait 3 seconds, repeat row 4. &quot;BucketAlreadyExists&quot; on AWS = the name is taken: add -2 to the end of the name.</p>
+<p><b style="color:#1a7333">CHECKPOINT:</b> <span style="font-family:'Roboto Mono',monospace">aws s3 ls</span> (in your column&#x27;s target) lists your bucket, and .env has the PAPERS_BUCKET line for the same target.</p>
+<p><b>If not:</b> &quot;Could not connect to the endpoint URL <a href="http://localhost:4566">http://localhost:4566</a>&quot; = FakeCloud is not running: <span style="font-family:'Roboto Mono',monospace">nohup fakecloud --storage-mode persistent --data-path ~/fakecloud-data &gt; ~/fakecloud.log 2&gt;&amp;1 &amp;</span>, wait 3 seconds, repeat row 4. &quot;BucketAlreadyExists&quot; on AWS = the name is taken: add -2 to the end of the name.</p>
 <h2>SECTION 4.5 - Run the first ingestion (3 papers)</h2>
 <p><b>WHERE:</b> VS Code Terminal, folder ~/querymesh, venv active</p>
 <p><b>GOAL:</b> real arXiv papers in OpenSearch and their PDFs in S3.</p>
 <p><b>Step 1.</b> Start a tmux window so the job survives a disconnect:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">tmux new -s ingest</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">tmux new -s ingest</pre>
 <p><b>Step 2.</b> Make sure you are in the project with the venv active (tmux opens a fresh shell):</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">cd ~/querymesh &amp;&amp; source .venv/bin/activate</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">cd ~/querymesh &amp;&amp; source .venv/bin/activate</pre>
 <p><b>Step 3.</b> Run the pipeline for 3 papers:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">python -m querymesh.ingest --query &quot;cat:cs.CL AND abs:retrieval&quot; --max-papers 3</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">python -m querymesh.ingest --query &quot;cat:cs.CL AND abs:retrieval&quot; --max-papers 3</pre>
 <p>You should see (the first run takes 2-5 minutes because Docling downloads its layout models, a few hundred MB, from Hugging Face):</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">search pipeline querymesh-rrf is ready
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">search pipeline querymesh-rrf is ready
 indexed 2510.xxxxxv1: 34 chunks  SOME PAPER TITLE ...
 indexed 2510.yyyyyv1: 52 chunks  ANOTHER PAPER TITLE ...
 indexed 2510.zzzzzv1: 27 chunks  A THIRD PAPER TITLE ...
 {&#x27;added&#x27;: [&#x27;2510.xxxxxv1&#x27;, &#x27;2510.yyyyyv1&#x27;, &#x27;2510.zzzzzv1&#x27;], &#x27;skipped&#x27;: []}</pre>
 <p>The IDs, titles and chunk counts are different for you: these are the newest papers on the day you run it.</p>
 <p><b>Step 4.</b> Run exactly the same command again:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">python -m querymesh.ingest --query &quot;cat:cs.CL AND abs:retrieval&quot; --max-papers 3</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">python -m querymesh.ingest --query &quot;cat:cs.CL AND abs:retrieval&quot; --max-papers 3</pre>
 <p><b>You should see:</b> no &quot;indexed&quot; lines and {&#x27;added&#x27;: [], &#x27;skipped&#x27;: [three IDs]} (unless new papers appeared in the last minutes). This proves the job is safe to re-run.</p>
 <p><b>Step 5.</b> Try the fast path that the Scout agent will use (abstracts only, no PDF):</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">python -m querymesh.ingest --query &quot;all:hallucination AND all:retrieval&quot; --max-papers 5 --abstracts-only</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">python -m querymesh.ingest --query &quot;all:hallucination AND all:retrieval&quot; --max-papers 5 --abstracts-only</pre>
 <p><b>You should see:</b> {&#x27;added&#x27;: [up to 5 IDs]} within about 15 seconds.</p>
 <p><b>Step 6.</b> Detach from tmux (the window keeps running): press Ctrl+B, release, then press D.</p>
 <p><b>Step 7.</b> Check the PDFs in S3 (in the same column/target as Section 4.4):</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">source scripts/use_fakecloud.sh &amp;&amp; aws s3 ls s3://querymesh-papers/pdfs/</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">source scripts/use_fakecloud.sh &amp;&amp; aws s3 ls s3://querymesh-papers/pdfs/</pre>
 <p><b>You should see:</b> three lines, one per PDF, with a size in bytes (real AWS: use s3://querymesh-papers-ACCOUNT_ID/pdfs/ after source scripts/use_aws.sh).</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>If you see...</b></td><td style="background-color:#e0e0e0"><b>It means...</b></td><td style="background-color:#e0e0e0"><b>Do this next</b></td></tr>
@@ -511,74 +511,74 @@ indexed 2510.zzzzzv1: 27 chunks  A THIRD PAPER TITLE ...
 <p><b>WHERE:</b> VS Code Terminal, folder ~/querymesh, venv active</p>
 <p><b>GOAL:</b> see BM25 and vector search merged by RRF return sensible chunks.</p>
 <p><b>Step 1.</b> Ask a question that fits your papers:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">python -m querymesh.search &quot;How can retrieval reduce hallucination in language models?&quot;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">python -m querymesh.search &quot;How can retrieval reduce hallucination in language models?&quot;</pre>
 <p><b>You should see:</b> up to 5 results shaped like this:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">[1] 0.0325 2510.xxxxxv1 SOME PAPER TITLE
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">[1] 0.0325 2510.xxxxxv1 SOME PAPER TITLE
     ## 3 Method We propose a retrieval step that ...
 [2] 0.0323 2510.yyyyyv1 ANOTHER PAPER TITLE
     Retrieval-augmented generation (RAG) reduces ...</pre>
 <p><b>Step 2.</b> Look at the scores: they are small numbers around 0.016 to 0.033. That is RRF: 1/61 + 1/61 = 0.0328 is the maximum for a chunk ranked first in both lists (Section 3.3).</p>
 <p><b>Step 3.</b> Try a question with an exact term (BM25 helps here):</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">python -m querymesh.search &quot;BM25&quot;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">python -m querymesh.search &quot;BM25&quot;</pre>
 <p><b>Step 4.</b> Try a paraphrase with no shared words (vectors help here):</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">python -m querymesh.search &quot;models inventing facts that are not true&quot;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">python -m querymesh.search &quot;models inventing facts that are not true&quot;</pre>
 <p><b>You should see:</b> chunks about hallucination, although the word hallucination is not in your question.</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>If you see...</b></td><td style="background-color:#e0e0e0"><b>It means...</b></td><td style="background-color:#e0e0e0"><b>Do this next</b></td></tr>
 <tr><td>an empty result (no lines)</td><td>the index is empty</td><td>run Section 4.5 Step 3</td></tr>
-<tr><td>search_phase_execution_exception mentioning hybrid</td><td>the pipeline is missing</td><td>run <span style="font-family:'Roboto Mono'">python -m querymesh.search setup</span></td></tr>
+<tr><td>search_phase_execution_exception mentioning hybrid</td><td>the pipeline is missing</td><td>run <span style="font-family:'Roboto Mono',monospace">python -m querymesh.search setup</span></td></tr>
 <tr><td>all scores exactly 0.0164</td><td>each chunk was found by only ONE of the two searches</td><td>normal for a tiny index; it improves when you have 50+ papers</td></tr>
 </table>
 <p><b style="color:#1a7333">CHECKPOINT:</b> Step 4 returns hallucination-related chunks.</p>
-<p><b>If not:</b> ingest more papers (<span style="font-family:'Roboto Mono'">--max-papers 20</span>) and try again; with 3 papers there may simply be nothing relevant.</p>
+<p><b>If not:</b> ingest more papers (<span style="font-family:'Roboto Mono',monospace">--max-papers 20</span>) and try again; with 3 papers there may simply be nothing relevant.</p>
 <h2>SECTION 4.7 - Look inside OpenSearch (so nothing is magic)</h2>
 <p><b>WHERE:</b> VS Code Terminal (any folder)</p>
 <p><b>GOAL:</b> count, read and delete chunks by hand with curl.</p>
 <p><b>Step 1.</b> Count all chunks:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:9200/arxiv-chunks/_count | jq .count</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:9200/arxiv-chunks/_count | jq .count</pre>
 <p><b>You should see:</b> a number such as 113 (three papers + the abstracts from Step 5 of 4.5).</p>
 <p><b>Step 2.</b> Read one chunk without its vector:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">curl -s &#x27;localhost:9200/arxiv-chunks/_search?size=1&amp;_source_excludes=embedding&#x27; | jq &#x27;.hits.hits[0]._source&#x27;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">curl -s &#x27;localhost:9200/arxiv-chunks/_search?size=1&amp;_source_excludes=embedding&#x27; | jq &#x27;.hits.hits[0]._source&#x27;</pre>
 <p><b>You should see:</b> chunk_id, paper_id, title, authors, published, url and text.</p>
 <p><b>Step 3.</b> Count the chunks of each paper:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:9200/arxiv-chunks/_search -H &#x27;Content-Type: application/json&#x27; -d &#x27;{&quot;size&quot;:0,&quot;aggs&quot;:{&quot;papers&quot;:{&quot;terms&quot;:{&quot;field&quot;:&quot;paper_id&quot;,&quot;size&quot;:50}}}}&#x27; | jq &#x27;.aggregations.papers.buckets&#x27;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:9200/arxiv-chunks/_search -H &#x27;Content-Type: application/json&#x27; -d &#x27;{&quot;size&quot;:0,&quot;aggs&quot;:{&quot;papers&quot;:{&quot;terms&quot;:{&quot;field&quot;:&quot;paper_id&quot;,&quot;size&quot;:50}}}}&#x27; | jq &#x27;.aggregations.papers.buckets&#x27;</pre>
 <p><b>You should see:</b> one entry per paper with its doc_count (the number of chunks).</p>
 <p><b>Step 4.</b> Run a BM25-only search (no vectors, no pipeline) to compare with Section 4.6:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:9200/arxiv-chunks/_search -H &#x27;Content-Type: application/json&#x27; -d &#x27;{&quot;size&quot;:3,&quot;_source&quot;:[&quot;title&quot;],&quot;query&quot;:{&quot;match&quot;:{&quot;text&quot;:&quot;hallucination&quot;}}}&#x27; | jq &#x27;.hits.hits[] | {score: ._score, title: ._source.title}&#x27;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:9200/arxiv-chunks/_search -H &#x27;Content-Type: application/json&#x27; -d &#x27;{&quot;size&quot;:3,&quot;_source&quot;:[&quot;title&quot;],&quot;query&quot;:{&quot;match&quot;:{&quot;text&quot;:&quot;hallucination&quot;}}}&#x27; | jq &#x27;.hits.hits[] | {score: ._score, title: ._source.title}&#x27;</pre>
 <p><b>You should see:</b> BM25 scores like 7.81 or 12.4: a completely different scale from vector scores. This is exactly why we merge by rank (RRF) and not by score.</p>
 <p><b>Step 5.</b> Note one paper_id from Step 3 that you want to remove (only if you need to re-ingest it).</p>
 <p><b>Step 6.</b> (Optional) Delete all chunks of that paper:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">curl -s -X POST localhost:9200/arxiv-chunks/_delete_by_query -H &#x27;Content-Type: application/json&#x27; -d &#x27;{&quot;query&quot;:{&quot;term&quot;:{&quot;paper_id&quot;:&quot;PAPER_ID&quot;}}}&#x27; | jq .deleted</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">curl -s -X POST localhost:9200/arxiv-chunks/_delete_by_query -H &#x27;Content-Type: application/json&#x27; -d &#x27;{&quot;query&quot;:{&quot;term&quot;:{&quot;paper_id&quot;:&quot;PAPER_ID&quot;}}}&#x27; | jq .deleted</pre>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Placeholder</b></td><td style="background-color:#e0e0e0"><b>Replace with</b></td><td style="background-color:#e0e0e0"><b>Example</b></td></tr>
 <tr><td>PAPER_ID</td><td>an ID from Step 3</td><td>2510.01234v1</td></tr>
 </table>
 <p><b style="color:#bf1a1a">Watch out:</b> in curl commands the single quotes around the JSON matter; copy the whole line.</p>
 <p><b style="color:#1a7333">CHECKPOINT:</b> Step 1 prints a number above 0 and Step 2 shows a readable chunk.</p>
-<p><b>If not:</b> &quot;index_not_found_exception&quot; = run <span style="font-family:'Roboto Mono'">python -m querymesh.search setup</span> and Section 4.5 again.</p>
+<p><b>If not:</b> &quot;index_not_found_exception&quot; = run <span style="font-family:'Roboto Mono',monospace">python -m querymesh.search setup</span> and Section 4.5 again.</p>
 <h2>SECTION 4.8 - Install Airflow 3.3.2 and schedule ingestion every night</h2>
 <p><b>WHERE:</b> VS Code Terminal on the VM, then your laptop browser (through VS Code port forwarding)</p>
 <p><b>GOAL:</b> Airflow runs the ingestion pipeline every day at 02:00 UTC, and you can trigger it by hand.</p>
 <p>Why a separate venv? Airflow pins hundreds of exact library versions. If it shared our .venv, it would fight with LangGraph and FastAPI. So Airflow lives in ~/airflow-venv and simply runs our project&#x27;s own Python (.venv/bin/python) as a command.</p>
 <p><b>Step 1.</b> Create the Airflow venv:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">uv venv -p 3.12 ~/airflow-venv</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">uv venv -p 3.12 ~/airflow-venv</pre>
 <p><b>Step 2.</b> Activate it:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">source ~/airflow-venv/bin/activate</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">source ~/airflow-venv/bin/activate</pre>
 <p><b>Step 3.</b> Install Airflow 3.3.2 with its official constraints file (takes 1-3 minutes) [13]:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">uv pip install &quot;apache-airflow==3.3.2&quot; --constraint &quot;https://raw.githubusercontent.com/apache/airflow/constraints-3.3.2/constraints-3.12.txt&quot;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">uv pip install &quot;apache-airflow==3.3.2&quot; --constraint &quot;https://raw.githubusercontent.com/apache/airflow/constraints-3.3.2/constraints-3.12.txt&quot;</pre>
 <p><b>You should see:</b> Installed NNN packages (a few hundred).</p>
 <p><b>Step 4.</b> Check the version:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">airflow version</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">airflow version</pre>
 <p><b>You should see:</b> 3.3.2 (the first run also creates ~/airflow with a config file; a warning about AIRFLOW_HOME is fine).</p>
 <p><b>Step 5.</b> Create the Airflow home folder (it may already exist after Step 4):</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">mkdir -p ~/airflow</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">mkdir -p ~/airflow</pre>
 <p><b>Step 6.</b> Link Airflow&#x27;s DAG folder to the project&#x27;s dags folder, so a DAG you save in VS Code is seen by Airflow at once:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">ln -sfn ~/querymesh/dags ~/airflow/dags</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">ln -sfn ~/querymesh/dags ~/airflow/dags</pre>
 <p><b>Step 7.</b> Check the link:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">ls -l ~/airflow/dags</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">ls -l ~/airflow/dags</pre>
 <p><b>You should see:</b> dags -&gt; /home/ubuntu/querymesh/dags</p>
 <p><b>Step 8.</b> In VS Code create the file dags/querymesh_ingest.py (right-click the folder dags &gt; New File... &gt; querymesh_ingest.py &gt; Enter), paste the grey box below, press Ctrl+S.</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;Airflow DAG: every day at 02:00 UTC, load the newest arXiv papers into QueryMesh.&quot;&quot;&quot;
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;Airflow DAG: every day at 02:00 UTC, load the newest arXiv papers into QueryMesh.&quot;&quot;&quot;
 from datetime import datetime
 
 from airflow.providers.standard.operators.bash import BashOperator
@@ -617,34 +617,34 @@ def querymesh_ingest():
 querymesh_ingest()</pre>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">from airflow.providers.standard.operators.bash import BashOperator</span></td><td>in Airflow 3 the BashOperator lives in the &quot;standard&quot; provider (installed with Airflow); it runs one shell command as a task</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">from airflow.sdk import dag</span></td><td>Airflow 3&#x27;s new import path for the @dag decorator</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">PROJECT = &quot;/home/ubuntu/querymesh&quot;</span></td><td>the full path of the project; Airflow tasks do not start in your folder, so we always cd there first</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">TOPICS = {...}</span></td><td>two searches: RAG papers (cs.CL + retrieval) and agent papers (cs.AI + agent); add more lines here to follow more topics</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">@dag(dag_id=&quot;querymesh_ingest&quot;, ...)</span></td><td>turns the function below into a DAG called querymesh_ingest</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">schedule=&quot;0 2 * * *&quot;</span></td><td>a cron expression: minute 0, hour 2, every day, every month, every weekday = daily at 02:00 UTC</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">start_date=datetime(2026, 10, 1)</span></td><td>the first date the schedule is valid from</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">catchup=False</span></td><td>do NOT create runs for all the past days since start_date; only the latest one</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">tags=[&quot;querymesh&quot;]</span></td><td>a label you can filter by in the Airflow UI</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">for name, query in TOPICS.items():</span></td><td>creates one task per topic</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">BashOperator(task_id=f&quot;ingest_{name}&quot;, ...)</span></td><td>the tasks are called ingest_rag and ingest_agents</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">bash_command=(f&quot;cd {PROJECT} &amp;&amp; .venv/bin/python -m querymesh.ingest --query &#x27;...&#x27; --max-papers 10&quot;)</span></td><td>go into the project and run the SAME command you ran by hand in 4.5, with the project&#x27;s Python, 10 papers per topic; load_dotenv then reads ~/querymesh/.env</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">retries=2</span></td><td>if arXiv or Jina has a hiccup, Airflow tries the task again, up to 2 more times</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">previous &gt;&gt; task</span></td><td>&quot;&gt;&gt;&quot; means &quot;run after&quot;: ingest_agents waits until ingest_rag has finished, so we never call arXiv twice at the same time</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">querymesh_ingest()</span></td><td>calling the function registers the DAG; without this line Airflow sees nothing</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">from airflow.providers.standard.operators.bash import BashOperator</span></td><td>in Airflow 3 the BashOperator lives in the &quot;standard&quot; provider (installed with Airflow); it runs one shell command as a task</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">from airflow.sdk import dag</span></td><td>Airflow 3&#x27;s new import path for the @dag decorator</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">PROJECT = &quot;/home/ubuntu/querymesh&quot;</span></td><td>the full path of the project; Airflow tasks do not start in your folder, so we always cd there first</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">TOPICS = {...}</span></td><td>two searches: RAG papers (cs.CL + retrieval) and agent papers (cs.AI + agent); add more lines here to follow more topics</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">@dag(dag_id=&quot;querymesh_ingest&quot;, ...)</span></td><td>turns the function below into a DAG called querymesh_ingest</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">schedule=&quot;0 2 * * *&quot;</span></td><td>a cron expression: minute 0, hour 2, every day, every month, every weekday = daily at 02:00 UTC</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">start_date=datetime(2026, 10, 1)</span></td><td>the first date the schedule is valid from</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">catchup=False</span></td><td>do NOT create runs for all the past days since start_date; only the latest one</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">tags=[&quot;querymesh&quot;]</span></td><td>a label you can filter by in the Airflow UI</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">for name, query in TOPICS.items():</span></td><td>creates one task per topic</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">BashOperator(task_id=f&quot;ingest_{name}&quot;, ...)</span></td><td>the tasks are called ingest_rag and ingest_agents</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">bash_command=(f&quot;cd {PROJECT} &amp;&amp; .venv/bin/python -m querymesh.ingest --query &#x27;...&#x27; --max-papers 10&quot;)</span></td><td>go into the project and run the SAME command you ran by hand in 4.5, with the project&#x27;s Python, 10 papers per topic; load_dotenv then reads ~/querymesh/.env</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">retries=2</span></td><td>if arXiv or Jina has a hiccup, Airflow tries the task again, up to 2 more times</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">previous &gt;&gt; task</span></td><td>&quot;&gt;&gt;&quot; means &quot;run after&quot;: ingest_agents waits until ingest_rag has finished, so we never call arXiv twice at the same time</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">querymesh_ingest()</span></td><td>calling the function registers the DAG; without this line Airflow sees nothing</td></tr>
 </table>
 <p><b>Step 9.</b> Start a new tmux session for Airflow:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">tmux new -s airflow</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">tmux new -s airflow</pre>
 <p><b>Step 10.</b> Inside tmux, activate the Airflow venv:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">source ~/airflow-venv/bin/activate</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">source ~/airflow-venv/bin/activate</pre>
 <p><b>Step 11.</b> Tell Airflow where its home is:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">export AIRFLOW_HOME=~/airflow</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">export AIRFLOW_HOME=~/airflow</pre>
 <p><b>Step 12.</b> Start Airflow (database, scheduler, DAG processor, API server and UI, all in one command):</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">airflow standalone</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">airflow standalone</pre>
 <p><b>You should see:</b> many log lines; after about 30-90 seconds a block that says Airflow is ready, with the login user admin. Leave it running.</p>
 <p><b>Step 13.</b> Detach from tmux: press Ctrl+B, release, then press D.</p>
 <p><b>Step 14.</b> Read the generated admin password:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">cat ~/airflow/simple_auth_manager_passwords.json.generated</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">cat ~/airflow/simple_auth_manager_passwords.json.generated</pre>
 <p><b>You should see:</b> {&quot;admin&quot;: &quot;SOMEPASSWORD&quot;}. Copy the password (without the quotes).</p>
 <p><b>Step 15.</b> In VS Code click the PORTS tab (next to TERMINAL; if you do not see it: View &gt; Open View... &gt; Ports).</p>
 <p><b>Step 16.</b> Click Forward a Port.</p>
@@ -668,30 +668,30 @@ querymesh_ingest()</pre>
 <p><b>Step 25.</b> Click the Logs tab.</p>
 <p><b>You should see:</b> the same lines as in Section 4.5, for example indexed 2510.....: NN chunks, and at the end the dictionary with added and skipped, then &quot;Command exited with return code 0&quot;.</p>
 <p><b>Step 26.</b> Back in the VS Code terminal, check that the chunk count went up:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:9200/arxiv-chunks/_count | jq .count</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:9200/arxiv-chunks/_count | jq .count</pre>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>If you see...</b></td><td style="background-color:#e0e0e0"><b>It means...</b></td><td style="background-color:#e0e0e0"><b>Do this next</b></td></tr>
-<tr><td>querymesh_ingest does not appear after 2 minutes</td><td>the DAG file has an error</td><td>in a new terminal: <span style="font-family:'Roboto Mono'">source ~/airflow-venv/bin/activate &amp;&amp; export AIRFLOW_HOME=~/airflow &amp;&amp; airflow dags list-import-errors</span>, fix the line it names, Ctrl+S</td></tr>
-<tr><td>Address already in use :8080</td><td>something else uses port 8080</td><td><span style="font-family:'Roboto Mono'">sudo lsof -i :8080</span>, stop that program, start airflow standalone again</td></tr>
-<tr><td>the task is red (failed) and the log says No such file or directory: .venv/bin/python</td><td>the project venv is missing or the path is wrong</td><td>check <span style="font-family:'Roboto Mono'">ls ~/querymesh/.venv/bin/python</span>; the project must be in /home/ubuntu/querymesh</td></tr>
+<tr><td>querymesh_ingest does not appear after 2 minutes</td><td>the DAG file has an error</td><td>in a new terminal: <span style="font-family:'Roboto Mono',monospace">source ~/airflow-venv/bin/activate &amp;&amp; export AIRFLOW_HOME=~/airflow &amp;&amp; airflow dags list-import-errors</span>, fix the line it names, Ctrl+S</td></tr>
+<tr><td>Address already in use :8080</td><td>something else uses port 8080</td><td><span style="font-family:'Roboto Mono',monospace">sudo lsof -i :8080</span>, stop that program, start airflow standalone again</td></tr>
+<tr><td>the task is red (failed) and the log says No such file or directory: .venv/bin/python</td><td>the project venv is missing or the path is wrong</td><td>check <span style="font-family:'Roboto Mono',monospace">ls ~/querymesh/.venv/bin/python</span>; the project must be in /home/ubuntu/querymesh</td></tr>
 <tr><td>the task log shows a Jina, arXiv or S3 error</td><td>the same errors as Section 4.5</td><td>use the branch table in 4.5; then click the task &gt; Clear task to run it again</td></tr>
 <tr><td>the browser cannot open localhost:8080</td><td>the port is not forwarded or VS Code is disconnected</td><td>repeat Steps 15-17 while VS Code is connected</td></tr>
-<tr><td>cat says No such file for the password file</td><td>Airflow is not fully started yet</td><td>wait 1 minute, run Step 14 again; check the tmux window with <span style="font-family:'Roboto Mono'">tmux attach -t airflow</span></td></tr>
+<tr><td>cat says No such file for the password file</td><td>Airflow is not fully started yet</td><td>wait 1 minute, run Step 14 again; check the tmux window with <span style="font-family:'Roboto Mono',monospace">tmux attach -t airflow</span></td></tr>
 </table>
 <p><b style="color:#bf1a1a">Watch out:</b> airflow standalone is made for learning and one machine. It keeps running only while the VM is on; after a hibernate/restore start it again with Steps 9-13. Production teams run Airflow on Kubernetes or use a managed service (Amazon MWAA, Astronomer). In Part 6B the same job also exists as a Kubernetes CronJob.</p>
 <p><b style="color:#1a7333">CHECKPOINT:</b> the manual run shows both tasks green, and the chunk count in Step 26 is higher than before.</p>
 <p><b>If not:</b> open the red task&#x27;s Logs tab and read the last 20 lines; they name the exact problem.</p>
 <h2>4.9 Common mistake at this level</h2>
 <p>Mixing up the two embedding tasks, or changing the embedding model after data is indexed. Symptom: search returns chunks that have nothing to do with the question, although everything &quot;works&quot; and there are no errors. How to spot it: run the BM25-only query from Section 4.7 Step 4; if BM25 finds the right paper but hybrid_search does not rank it in the top 5, the vectors are wrong. Fix: make sure chunks use retrieval.passage and questions use retrieval.query (they do in our code), and if you ever change EMBED_MODEL or EMBED_DIM, delete the index (Section 4.2 Watch out) and ingest again.</p>
-<p>A second classic mistake: running ingestion with the aws CLI pointed at FakeCloud but .env pointed at real AWS (or the reverse). Symptom: aws s3 ls shows no PDFs although ingestion succeeded. Fix: compare <span style="font-family:'Roboto Mono'">echo <span style="font-family:'Roboto Mono'">$</span>AWS_ENDPOINT_URL</span> with the AWS_ENDPOINT_URL line in .env (Section 4.4).</p>
+<p>A second classic mistake: running ingestion with the aws CLI pointed at FakeCloud but .env pointed at real AWS (or the reverse). Symptom: aws s3 ls shows no PDFs although ingestion succeeded. Fix: compare <span style="font-family:'Roboto Mono',monospace">echo <span style="font-family:'Roboto Mono',monospace">$</span>AWS_ENDPOINT_URL</span> with the AWS_ENDPOINT_URL line in .env (Section 4.4).</p>
 <h2>PART 4 RESULT CHECK (all must be true before Part 5)</h2>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Check</b></td><td style="background-color:#e0e0e0"><b>Command</b></td><td style="background-color:#e0e0e0"><b>Expected</b></td></tr>
-<tr><td>embeddings work</td><td><span style="font-family:'Roboto Mono'">python -m querymesh.embeddings</span></td><td>dimensions=1024</td></tr>
-<tr><td>index + pipeline</td><td><span style="font-family:'Roboto Mono'">curl -s localhost:9200/_search/pipeline/querymesh-rrf | jq &#x27;keys&#x27;</span></td><td>[&quot;querymesh-rrf&quot;]</td></tr>
-<tr><td>chunks stored</td><td><span style="font-family:'Roboto Mono'">curl -s localhost:9200/arxiv-chunks/_count | jq .count</span></td><td>a number above 50</td></tr>
-<tr><td>hybrid search</td><td><span style="font-family:'Roboto Mono'">python -m querymesh.search &quot;retrieval augmented generation&quot;</span></td><td>5 numbered results with scores around 0.016-0.033</td></tr>
-<tr><td>PDFs in S3</td><td><span style="font-family:'Roboto Mono'">source scripts/use_fakecloud.sh &amp;&amp; aws s3 ls s3://querymesh-papers/pdfs/</span></td><td>at least 3 PDF files</td></tr>
+<tr><td>embeddings work</td><td><span style="font-family:'Roboto Mono',monospace">python -m querymesh.embeddings</span></td><td>dimensions=1024</td></tr>
+<tr><td>index + pipeline</td><td><span style="font-family:'Roboto Mono',monospace">curl -s localhost:9200/_search/pipeline/querymesh-rrf | jq &#x27;keys&#x27;</span></td><td>[&quot;querymesh-rrf&quot;]</td></tr>
+<tr><td>chunks stored</td><td><span style="font-family:'Roboto Mono',monospace">curl -s localhost:9200/arxiv-chunks/_count | jq .count</span></td><td>a number above 50</td></tr>
+<tr><td>hybrid search</td><td><span style="font-family:'Roboto Mono',monospace">python -m querymesh.search &quot;retrieval augmented generation&quot;</span></td><td>5 numbered results with scores around 0.016-0.033</td></tr>
+<tr><td>PDFs in S3</td><td><span style="font-family:'Roboto Mono',monospace">source scripts/use_fakecloud.sh &amp;&amp; aws s3 ls s3://querymesh-papers/pdfs/</span></td><td>at least 3 PDF files</td></tr>
 <tr><td>Airflow</td><td>browser <a href="http://localhost:8080">http://localhost:8080</a> &gt; Dags &gt; querymesh_ingest</td><td>unpaused, last run green</td></tr>
 </table>
 <p>You have now built resume line 3 (ingestion: arXiv API, Docling parsing, Airflow DAG scheduling) and resume line 4 (hybrid search: OpenSearch BM25 + Jina embeddings + RRF).</p>

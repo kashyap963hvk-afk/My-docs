@@ -1,4 +1,4 @@
-<html><head><meta charset="utf-8"></head><body style="font-family:Arial">
+<html><head><meta charset="utf-8"></head><body>
 <h1>PART 3 - The Core Idea (read this before you write any code)</h1>
 <p>This part has no typing. Read it once from top to bottom (about 45 minutes). Every later part points back to a section here, so when something feels like magic later, come back to the matching section.</p>
 <h2>3.0 One analogy for the whole project: a research library with a team of specialists</h2>
@@ -24,7 +24,7 @@
 <p>An embedding model reads a piece of text and returns a list of numbers (a vector). Our model, Jina jina-embeddings-v5-text-small, returns 1024 numbers for any text [17][18]. Texts with similar meaning get vectors that point in a similar direction, even when they use different words.</p>
 <p>Example: &quot;car crash&quot; and &quot;vehicle collision&quot; share no words, but their vectors are close. A keyword search would miss this; a vector search finds it.</p>
 <p>How close two vectors are is measured with cosine similarity: 1.0 means the same direction (same meaning), 0 means unrelated. We ask Jina for &quot;normalized&quot; vectors (length 1), which makes this comparison fast and fair.</p>
-<p>Asymmetric tasks: Jina embeds a question and a passage slightly differently. We send task <span style="font-family:'Roboto Mono'">retrieval.passage</span> when we store paper chunks and task <span style="font-family:'Roboto Mono'">retrieval.query</span> when we embed the user&#x27;s question. Mixing them up makes search worse.</p>
+<p>Asymmetric tasks: Jina embeds a question and a passage slightly differently. We send task <span style="font-family:'Roboto Mono',monospace">retrieval.passage</span> when we store paper chunks and task <span style="font-family:'Roboto Mono',monospace">retrieval.query</span> when we embed the user&#x27;s question. Mixing them up makes search worse.</p>
 <p>1-minute check: why would vector search find a paper about &quot;LLM hallucination&quot; when you ask about &quot;models making up facts&quot;? Answer: the meanings are close, so the vectors are close, even with no shared words.</p>
 <h2>3.2 BM25: &quot;exact words, weighted cleverly&quot;</h2>
 <p>BM25 is the classic keyword-ranking formula that OpenSearch uses by default for text fields. In plain words, a chunk scores higher when:</p>
@@ -51,7 +51,7 @@
 </table>
 <p>What to notice:</p>
 <ul><li>Paper B wins although it was first in only one list: being high in BOTH lists beats being first in one.</li><li>Papers that appear in only one list (C, D) still get a place, so no good result is lost.</li><li>A bigger k (for example 100) makes the differences between ranks smaller; a smaller k (for example 10) gives the top positions more weight. Part 7 lets you measure this.</li></ul>
-<p>In OpenSearch this is two pieces: a <span style="font-family:'Roboto Mono'">hybrid</span> query that holds the BM25 query and the k-NN query [14], and a search pipeline with the <span style="font-family:'Roboto Mono'">score-ranker-processor</span> set to <span style="font-family:'Roboto Mono'">rrf</span> that does the merging [15]. You create both in Part 4.</p>
+<p>In OpenSearch this is two pieces: a <span style="font-family:'Roboto Mono',monospace">hybrid</span> query that holds the BM25 query and the k-NN query [14], and a search pipeline with the <span style="font-family:'Roboto Mono',monospace">score-ranker-processor</span> set to <span style="font-family:'Roboto Mono',monospace">rrf</span> that does the merging [15]. You create both in Part 4.</p>
 <p>1-minute check: Paper E is 2nd in BM25 and 2nd in vector. Paper F is 1st in BM25 and missing from vector. Which ranks higher? Answer: E (1/62 + 1/62 = 0.032258) beats F (1/61 = 0.016393).</p>
 <h2>3.4 Chunking: &quot;cut the paper into index cards&quot;</h2>
 <p>A research paper is 10 to 40 pages. An embedding of a whole paper would be a blurry average of everything in it, and the LLM could not read 30 papers at once anyway. So we cut each paper into chunks of about 1,500 characters (roughly 250-350 words).</p>
@@ -61,10 +61,10 @@
 <p>1-minute check: why the 200-character overlap? Answer: a fact that sits across the cut appears whole in at least one of the two chunks.</p>
 <h2>3.5 RAG versus agentic RAG</h2>
 <p>RAG (retrieval-augmented generation) = search first, then let the LLM answer using only what was found. Plain RAG is a straight line:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">question -&gt; search -&gt; top chunks -&gt; LLM writes answer -&gt; done</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">question -&gt; search -&gt; top chunks -&gt; LLM writes answer -&gt; done</pre>
 <p>The weakness: if the search returns bad chunks, the LLM still writes something, often a confident wrong answer (a hallucination).</p>
 <p>Agentic RAG adds checks and loops, so the system can notice a bad step and try again [45]:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">question -&gt; retrieve -&gt; grade the chunks
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">question -&gt; retrieve -&gt; grade the chunks
    enough relevant chunks?   no -&gt; rewrite the query -&gt; retrieve again (max 2 times)
                              still no -&gt; scout fetches fresh arXiv papers -&gt; retrieve again
    yes -&gt; write the answer with [n] citations -&gt; critic checks it
@@ -149,7 +149,7 @@
 <tr><td>EKS</td><td>only stores the cluster&#x27;s description; there is no Kubernetes to run pods [8]</td><td>a real cluster</td></tr>
 <tr><td>Where the pods really run in this manual</td><td>kind on the VM</td><td>EKS worker machines</td></tr>
 <tr><td>Load balancer</td><td>we use kubectl port-forward</td><td>a real ALB with a public DNS name</td></tr>
-<tr><td>Bill</td><td>US<span style="font-family:'Roboto Mono'">$</span>0</td><td>EKS US<span style="font-family:'Roboto Mono'">$</span>0.10/h + machines + NAT + ALB [36][41]; always tear down (Section 6B.15)</td></tr>
+<tr><td>Bill</td><td>US<span style="font-family:'Roboto Mono',monospace">$</span>0</td><td>EKS US<span style="font-family:'Roboto Mono',monospace">$</span>0.10/h + machines + NAT + ALB [36][41]; always tear down (Section 6B.15)</td></tr>
 </table>
 <p>The rule of this manual: do every cloud step first in the white FakeCloud column. Only when it works there, do the same step in the light-blue Real AWS column.</p>
 <p><b style="color:#1a7333">CHECKPOINT:</b> you can explain, without looking, what RRF does with two ranked lists, what the supervisor does after the grader finds only 1 relevant chunk, and the difference between MCP and A2A.</p>

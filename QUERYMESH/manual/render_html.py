@@ -11,8 +11,8 @@ from pathlib import Path
 from build_doc import INLINE_RE, LABEL_RE, ROOT, URL_RE
 
 LABEL_COLOR = {"Watch out:": "#bf1a1a", "CHECKPOINT:": "#1a7333"}
-CODE_STYLE = "font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2"  # grey code boxes
-SPAN_STYLE = "font-family:'Roboto Mono'"  # inline code
+CODE_STYLE = "font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2"  # grey code boxes
+SPAN_STYLE = "font-family:'Roboto Mono',monospace"  # inline code
 # Google's HTML import turns text between two $ signs into a math equation; a $ inside its
 # own styled span is left alone.
 DOLLAR = f'<span style="{SPAN_STYLE}">$</span>'
@@ -122,7 +122,7 @@ def render(source: str) -> str:
             out.append(f"<p>{inline(line)}</p>")
         i += 1
     flush_bullets()
-    return ('<html><head><meta charset="utf-8"></head><body style="font-family:Arial">\n'
+    return ('<html><head><meta charset="utf-8"></head><body>\n'
             + "\n".join(out) + "\n</body></html>\n")
 
 

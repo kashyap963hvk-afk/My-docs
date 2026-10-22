@@ -1,4 +1,4 @@
-<html><head><meta charset="utf-8"></head><body style="font-family:Arial">
+<html><head><meta charset="utf-8"></head><body>
 <h1>PART 2B - Project folder + tools on the GPU computer (from an empty disk)</h1>
 <h2>BEFORE YOU START: what you are building in this part</h2>
 <p>You now have an empty GPU computer. In this part you create the QueryMesh folder structure by hand, learn the ONE procedure you will use to create every file in this manual, install the tools (tmux, uv, Python 3.12, the AWS CLI, FakeCloud), create the Python environment, store your secrets in a .env file, and start the two big services that everything else needs: vLLM (the language model) and OpenSearch (the search engine).</p>
@@ -14,7 +14,7 @@
 <tr><td>Git + GitHub</td><td>version control and code hosting</td><td>your portfolio; GitHub Actions deploys from it in Part 6B</td></tr>
 </table>
 <p>Result at the end of this part: this folder tree exists, the .venv works, vLLM answers on port 8000, OpenSearch answers on port 9200, FakeCloud answers on port 4566, and your code is on GitHub.</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">/home/ubuntu/querymesh/
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">/home/ubuntu/querymesh/
 ├── querymesh/            the Python package: agents, graph, search, API, UIs
 ├── dags/                 the Airflow schedule (Part 4)
 ├── tests/                automatic tests (Parts 5-6A)
@@ -28,13 +28,13 @@
 <p><b>WHERE:</b> VS Code Terminal (bottom-left shows SSH: querymesh)</p>
 <p><b>GOAL:</b> the empty folder tree above.</p>
 <p><b>Step 1.</b> Go to your home folder:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">cd ~</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">cd ~</pre>
 <p><b>Step 2.</b> Create the project folder and all sub-folders in one command:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">mkdir -p querymesh/querymesh querymesh/dags querymesh/tests querymesh/scripts querymesh/deploy/helm/querymesh/templates querymesh/deploy/k8s querymesh/deploy/aws querymesh/.github/workflows querymesh/data</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">mkdir -p querymesh/querymesh querymesh/dags querymesh/tests querymesh/scripts querymesh/deploy/helm/querymesh/templates querymesh/deploy/k8s querymesh/deploy/aws querymesh/.github/workflows querymesh/data</pre>
 <p><b>Step 3.</b> Go into the project folder:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">cd ~/querymesh</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">cd ~/querymesh</pre>
 <p><b>Step 4.</b> List what you created (including hidden folders that start with a dot):</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">ls -a</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">ls -a</pre>
 <p><b>You should see:</b> .  ..  .github  dags  data  deploy  querymesh  scripts  tests</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Piece</b></td><td style="background-color:#e0e0e0"><b>What it does</b></td></tr>
@@ -64,11 +64,11 @@
 <p><b>Step 5.</b> Click inside the empty editor and press Ctrl+V.</p>
 <p><b>Step 6.</b> Press Ctrl+S to save (the dot on the file&#x27;s tab disappears).</p>
 <p>Practice content for README.md:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2"># QueryMesh
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2"># QueryMesh
 A production-grade arXiv research assistant: five LangGraph agents (retriever, grader,
 writer, critic, scout) behind FastMCP + A2A, hybrid search in OpenSearch, deployed on AWS EKS.</pre>
 <p><b>Step 7.</b> Check the file from the terminal:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">cat README.md</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">cat README.md</pre>
 <p><b>You should see:</b> the three lines you pasted.</p>
 <p><b style="color:#bf1a1a">Watch out:</b> (1) the file name must match EXACTLY, including the extension (.py, .sh, .yaml, .toml); (2) right-click the CORRECT folder, otherwise the file lands in the wrong place; to create a file inside querymesh/querymesh, right-click the INNER querymesh folder; (3) Google Docs can turn straight quotes into curly quotes if you edit the document: always copy from the grey box, and if Python reports &quot;invalid character&quot;, re-paste the file.</p>
 <p><b style="color:#bf1a1a">Watch out:</b> Python cares about spaces at the start of a line. Paste the whole grey box in one go; do not retype it.</p>
@@ -77,19 +77,19 @@ writer, critic, scout) behind FastMCP + A2A, hybrid search in OpenSearch, deploy
 <p><b>WHERE:</b> VS Code Terminal, folder ~/querymesh</p>
 <p><b>GOAL:</b> tmux, git, jq and unzip installed; you can start, leave and re-enter a tmux session.</p>
 <p><b>Step 1.</b> Install the tools:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">sudo apt-get update &amp;&amp; sudo apt-get install -y tmux git unzip jq</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">sudo apt-get update &amp;&amp; sudo apt-get install -y tmux git unzip jq</pre>
 <p><b>You should see:</b> the last lines say &quot;Setting up tmux ...&quot; or &quot;tmux is already the newest version&quot;.</p>
 <p><b>Step 2.</b> Start a practice tmux session:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">tmux new -s practice</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">tmux new -s practice</pre>
 <p><b>Step 3.</b> In the tmux session type a long-running command:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">for i in <span style="font-family:'Roboto Mono'">$</span>(seq 1 300); do echo &quot;tick <span style="font-family:'Roboto Mono'">$</span>i&quot;; sleep 1; done</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">for i in <span style="font-family:'Roboto Mono',monospace">$</span>(seq 1 300); do echo &quot;tick <span style="font-family:'Roboto Mono',monospace">$</span>i&quot;; sleep 1; done</pre>
 <p><b>Step 4.</b> Detach (leave it running): press Ctrl+B, release both keys, then press D.</p>
 <p><b>You should see:</b> &quot;[detached (from session practice)]&quot; and your normal prompt.</p>
 <p><b>Step 5.</b> List sessions:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">tmux ls</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">tmux ls</pre>
 <p><b>You should see:</b> practice: 1 windows ...</p>
 <p><b>Step 6.</b> Re-attach:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">tmux attach -t practice</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">tmux attach -t practice</pre>
 <p><b>You should see:</b> the ticks still counting.</p>
 <p><b>Step 7.</b> Stop the loop with Ctrl+C.</p>
 <p><b>Step 8.</b> Type exit and press Enter to close the session.</p>
@@ -108,11 +108,11 @@ writer, critic, scout) behind FastMCP + A2A, hybrid search in OpenSearch, deploy
 <p><b>WHERE:</b> VS Code Terminal, folder ~/querymesh</p>
 <p><b>GOAL:</b> the uv command works.</p>
 <p><b>Step 1.</b> Install:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">curl -LsSf https://astral.sh/uv/install.sh | sh</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">curl -LsSf https://astral.sh/uv/install.sh | sh</pre>
 <p><b>Step 2.</b> Load it into this terminal:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">source ~/.bashrc</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">source ~/.bashrc</pre>
 <p><b>Step 3.</b> Check:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">uv --version</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">uv --version</pre>
 <p><b>You should see:</b> uv 0.x.x (any recent version, for example uv 0.11.32)</p>
 <p>Why uv: it creates environments and installs packages 10-100x faster than pip, and it downloads Python 3.12 by itself if the computer does not have it [42].</p>
 <p><b style="color:#1a7333">CHECKPOINT:</b> uv --version prints a version.</p>
@@ -126,7 +126,7 @@ writer, critic, scout) behind FastMCP + A2A, hybrid search in OpenSearch, deploy
 <p><b>Step 3.</b> Type pyproject.toml and press Enter.</p>
 <p><b>Step 4.</b> Paste the grey box below.</p>
 <p><b>Step 5.</b> Press Ctrl+S.</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">[project]
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">[project]
 name = &quot;querymesh&quot;
 version = &quot;1.0.0&quot;
 description = &quot;QueryMesh: a multi-agent arXiv research assistant&quot;
@@ -207,7 +207,7 @@ ignore_no_config = true</pre>
 <p><b>Step 8.</b> Type __init__.py (two underscores before and after init) and press Enter.</p>
 <p><b>Step 9.</b> Paste the grey box below.</p>
 <p><b>Step 10.</b> Press Ctrl+S.</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;QueryMesh: a multi-agent arXiv research assistant.&quot;&quot;&quot;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;QueryMesh: a multi-agent arXiv research assistant.&quot;&quot;&quot;</pre>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Line</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
 <tr><td>&quot;&quot;&quot;QueryMesh: ...&quot;&quot;&quot;</td><td>a docstring: a one-line description. A folder with an __init__.py file can be imported in Python (import querymesh)</td></tr>
@@ -217,19 +217,19 @@ ignore_no_config = true</pre>
 <p><b>WHERE:</b> VS Code Terminal, folder ~/querymesh</p>
 <p><b>GOAL:</b> .venv with all QueryMesh libraries, and it switches on by itself in every new terminal.</p>
 <p><b>Step 1.</b> Create the environment with Python 3.12:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">uv venv -p 3.12 .venv</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">uv venv -p 3.12 .venv</pre>
 <p><b>You should see:</b> &quot;Using CPython 3.12.x&quot; and &quot;Creating virtual environment at: .venv&quot;</p>
 <p><b>Step 2.</b> Switch it on (activate it):</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">source .venv/bin/activate</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">source .venv/bin/activate</pre>
 <p><b>You should see:</b> the prompt now starts with (querymesh) or (.venv).</p>
 <p><b>Step 3.</b> Install QueryMesh with the dev and ingest groups (5-10 minutes; Docling brings PyTorch, about 3-4 GB):</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">uv pip install -e &quot;.[dev,ingest]&quot;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">uv pip install -e &quot;.[dev,ingest]&quot;</pre>
 <p><b>You should see:</b> a long list ending with lines such as + langgraph==1.2.16, + fastmcp==4.1.3, + docling==2.141.0, + querymesh==1.0.0 (from file:///home/ubuntu/querymesh)</p>
 <p><b>Step 4.</b> Check the main imports work:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">python -c &quot;import langgraph, fastmcp, a2a, opensearchpy, docling, gradio, telegram; print(&#x27;all imports ok&#x27;)&quot;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">python -c &quot;import langgraph, fastmcp, a2a, opensearchpy, docling, gradio, telegram; print(&#x27;all imports ok&#x27;)&quot;</pre>
 <p><b>You should see:</b> all imports ok</p>
 <p><b>Step 5.</b> Make every new terminal open the project with the environment on:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">echo &#x27;cd ~/querymesh &amp;&amp; source .venv/bin/activate&#x27; &gt;&gt; ~/.bashrc</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">echo &#x27;cd ~/querymesh &amp;&amp; source .venv/bin/activate&#x27; &gt;&gt; ~/.bashrc</pre>
 <p><b>Step 6.</b> Close this terminal (trash-can icon) and open Terminal &gt; New Terminal.</p>
 <p><b>You should see:</b> the new prompt starts with (querymesh) or (.venv) and pwd prints /home/ubuntu/querymesh.</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
@@ -252,7 +252,7 @@ ignore_no_config = true</pre>
 <p><b>Step 3.</b> Type .env.example and press Enter.</p>
 <p><b>Step 4.</b> Paste the grey box below.</p>
 <p><b>Step 5.</b> Press Ctrl+S.</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2"># Copy this file to .env and fill in the values marked CHANGE_ME.
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2"># Copy this file to .env and fill in the values marked CHANGE_ME.
 # Search
 OPENSEARCH_URL=http://localhost:9200
 INDEX_NAME=arxiv-chunks
@@ -324,17 +324,17 @@ TELEGRAM_BOT_TOKEN=</pre>
 </table>
 <p>FILE 2: .env (your real copy).</p>
 <p><b>Step 6.</b> In the terminal copy the template:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">cp .env.example .env</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">cp .env.example .env</pre>
 <p><b>Step 7.</b> Generate a random LLM_API_KEY:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">python3 -c &quot;import secrets; print(secrets.token_urlsafe(32))&quot;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">python3 -c &quot;import secrets; print(secrets.token_urlsafe(32))&quot;</pre>
 <p><b>You should see:</b> one line of about 43 random characters. Copy it.</p>
 <p><b>Step 8.</b> In the Explorer click the file .env (it opens in the editor).</p>
 <p><b>Step 9.</b> In the line LLM_API_KEY=CHANGE_ME, replace CHANGE_ME with the value from Step 7.</p>
 <p><b>Step 10.</b> Generate a random JWT_SECRET (longer):</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">python3 -c &quot;import secrets; print(secrets.token_urlsafe(48))&quot;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">python3 -c &quot;import secrets; print(secrets.token_urlsafe(48))&quot;</pre>
 <p><b>Step 11.</b> In .env replace CHANGE_ME in JWT_SECRET=CHANGE_ME with that value.</p>
 <p><b>Step 12.</b> Generate a random API password:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">python3 -c &quot;import secrets; print(secrets.token_urlsafe(12))&quot;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">python3 -c &quot;import secrets; print(secrets.token_urlsafe(12))&quot;</pre>
 <p><b>Step 13.</b> In .env replace CHANGE_ME in API_PASSWORD=CHANGE_ME with that value.</p>
 <p><b>Step 14.</b> In .env replace CHANGE_ME in JINA_API_KEY=CHANGE_ME with your jina_... key from secrets.txt.</p>
 <p><b>Step 15.</b> Press Ctrl+S.</p>
@@ -354,7 +354,7 @@ TELEGRAM_BOT_TOKEN=</pre>
 <p><b>Step 19.</b> Type config.py and press Enter.</p>
 <p><b>Step 20.</b> Paste the grey box below.</p>
 <p><b>Step 21.</b> Press Ctrl+S.</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;Every setting QueryMesh needs, read from environment variables (the .env file).&quot;&quot;&quot;
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;Every setting QueryMesh needs, read from environment variables (the .env file).&quot;&quot;&quot;
 import os
 
 from dotenv import load_dotenv
@@ -429,7 +429,7 @@ TOP_K = int(env(&quot;TOP_K&quot;, &quot;8&quot;))</pre>
 <tr><td>TOP_K = 8</td><td>how many chunks one search returns</td></tr>
 </table>
 <p><b>Step 22.</b> Test that config.py reads your .env:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">python -c &quot;from querymesh import config; print(config.LLM_MODEL, config.OPENSEARCH_URL, len(config.JWT_SECRET), config.JINA_API_KEY[:5])&quot;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">python -c &quot;from querymesh import config; print(config.LLM_MODEL, config.OPENSEARCH_URL, len(config.JWT_SECRET), config.JINA_API_KEY[:5])&quot;</pre>
 <p><b>You should see:</b> qwen3-4b <a href="http://localhost:9200">http://localhost:9200</a> 64 jina_</p>
 <p><b style="color:#bf1a1a">Watch out:</b> never paste the content of .env into a chat, a screenshot or Git. Section 2B.13 makes Git ignore it.</p>
 <p><b style="color:#1a7333">CHECKPOINT:</b> Step 22 printed 64 and jina_.</p>
@@ -438,11 +438,11 @@ TOP_K = int(env(&quot;TOP_K&quot;, &quot;8&quot;))</pre>
 <p><b>WHERE:</b> VS Code Terminal, folder ~/querymesh</p>
 <p><b>GOAL:</b> proof that Docker containers can use the GPU (vLLM runs in one).</p>
 <p><b>Step 1.</b> Check Docker can use the GPU:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">docker run --rm --gpus all public.ecr.aws/docker/library/ubuntu:24.04 nvidia-smi</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">docker run --rm --gpus all public.ecr.aws/docker/library/ubuntu:24.04 nvidia-smi</pre>
 <p><b>You should see:</b> the same nvidia-smi table as in Section 2A.9 (NVIDIA RTX A6000), printed from inside a container.</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>If you see...</b></td><td style="background-color:#e0e0e0"><b>It means...</b></td><td style="background-color:#e0e0e0"><b>Do this next</b></td></tr>
-<tr><td>permission denied while trying to connect to the Docker daemon socket</td><td>your user is not in the docker group</td><td>run <span style="font-family:'Roboto Mono'">sudo usermod -aG docker ubuntu</span>, then click File &gt; Close Remote Connection, reconnect (Section 2A.10 Steps 6-10) and repeat Step 1</td></tr>
+<tr><td>permission denied while trying to connect to the Docker daemon socket</td><td>your user is not in the docker group</td><td>run <span style="font-family:'Roboto Mono',monospace">sudo usermod -aG docker ubuntu</span>, then click File &gt; Close Remote Connection, reconnect (Section 2A.10 Steps 6-10) and repeat Step 1</td></tr>
 <tr><td>could not select device driver &quot;&quot; with capabilities: [[gpu]]</td><td>NVIDIA container toolkit missing</td><td>you picked an image without &quot;with Docker&quot;; redeploy with the right image (Section 2A.7)</td></tr>
 <tr><td>toomanyrequests / rate limit</td><td>the image registry limits anonymous downloads</td><td>wait 10 minutes and try again</td></tr>
 <tr><td>Piece</td><td>What it means</td><td></td></tr>
@@ -461,67 +461,67 @@ TOP_K = int(env(&quot;TOP_K&quot;, &quot;8&quot;))</pre>
 <p><b>Step 3.</b> Type start_vllm.sh and press Enter.</p>
 <p><b>Step 4.</b> Paste the grey box below.</p>
 <p><b>Step 5.</b> Press Ctrl+S.</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">#!/usr/bin/env bash
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">#!/usr/bin/env bash
 # Start the language model server on the Hyperstack GPU (OpenAI-compatible API on port 8000).
 set -euo pipefail
-cd &quot;<span style="font-family:'Roboto Mono'">$</span>(dirname &quot;<span style="font-family:'Roboto Mono'">$</span>0&quot;)/..&quot;
-LLM_API_KEY=<span style="font-family:'Roboto Mono'">$</span>(grep &#x27;^LLM_API_KEY=&#x27; .env | cut -d= -f2)
+cd &quot;<span style="font-family:'Roboto Mono',monospace">$</span>(dirname &quot;<span style="font-family:'Roboto Mono',monospace">$</span>0&quot;)/..&quot;
+LLM_API_KEY=<span style="font-family:'Roboto Mono',monospace">$</span>(grep &#x27;^LLM_API_KEY=&#x27; .env | cut -d= -f2)
 
 docker rm -f vllm 2&gt;/dev/null || true
 docker run -d --name vllm --restart unless-stopped \
   --gpus all --ipc=host -p 8000:8000 \
-  -v &quot;<span style="font-family:'Roboto Mono'">$</span>HOME/.cache/huggingface:/root/.cache/huggingface&quot; \
+  -v &quot;<span style="font-family:'Roboto Mono',monospace">$</span>HOME/.cache/huggingface:/root/.cache/huggingface&quot; \
   vllm/vllm-openai:v0.32.0 \
   --model Qwen/Qwen3-4B-Instruct-2507 \
   --served-model-name qwen3-4b \
   --max-model-len 32768 \
   --gpu-memory-utilization 0.80 \
-  --api-key &quot;<span style="font-family:'Roboto Mono'">$</span>LLM_API_KEY&quot;
+  --api-key &quot;<span style="font-family:'Roboto Mono',monospace">$</span>LLM_API_KEY&quot;
 echo &quot;vLLM is starting. Follow the log with: docker logs -f vllm&quot;</pre>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
 <tr><td>#!/usr/bin/env bash</td><td>&quot;run this file with bash&quot;</td></tr>
 <tr><td>set -euo pipefail</td><td>stop at the first error, treat unknown variables as errors, and fail if any part of a pipe fails</td></tr>
-<tr><td>cd &quot;<span style="font-family:'Roboto Mono'">$</span>(dirname &quot;<span style="font-family:'Roboto Mono'">$</span>0&quot;)/..&quot;</td><td>go to the project folder (the folder above scripts/), wherever you start the script from</td></tr>
-<tr><td>LLM_API_KEY=<span style="font-family:'Roboto Mono'">$</span>(grep &#x27;^LLM_API_KEY=&#x27; .env | cut -d= -f2)</td><td>read your LLM_API_KEY from .env: find the line, keep the text after =</td></tr>
+<tr><td>cd &quot;<span style="font-family:'Roboto Mono',monospace">$</span>(dirname &quot;<span style="font-family:'Roboto Mono',monospace">$</span>0&quot;)/..&quot;</td><td>go to the project folder (the folder above scripts/), wherever you start the script from</td></tr>
+<tr><td>LLM_API_KEY=<span style="font-family:'Roboto Mono',monospace">$</span>(grep &#x27;^LLM_API_KEY=&#x27; .env | cut -d= -f2)</td><td>read your LLM_API_KEY from .env: find the line, keep the text after =</td></tr>
 <tr><td>docker rm -f vllm 2&gt;/dev/null || true</td><td>delete an old container named vllm if there is one; no error if there is none</td></tr>
 <tr><td>docker run -d --name vllm</td><td>start a container in the background (-d) and call it vllm</td></tr>
 <tr><td>--restart unless-stopped</td><td>start it again automatically after a reboot or a Hyperstack restore</td></tr>
 <tr><td>--gpus all --ipc=host</td><td>give it the GPU, and the shared memory vLLM needs</td></tr>
 <tr><td>-p 8000:8000</td><td>port 8000 of the VM goes to port 8000 of the container</td></tr>
-<tr><td>-v &quot;<span style="font-family:'Roboto Mono'">$</span>HOME/.cache/huggingface:/root/.cache/huggingface&quot;</td><td>keep the downloaded model (about 8 GB) on the VM disk, so it is downloaded only once</td></tr>
+<tr><td>-v &quot;<span style="font-family:'Roboto Mono',monospace">$</span>HOME/.cache/huggingface:/root/.cache/huggingface&quot;</td><td>keep the downloaded model (about 8 GB) on the VM disk, so it is downloaded only once</td></tr>
 <tr><td>vllm/vllm-openai:v0.32.0</td><td>the official vLLM image, version 0.32.0 (verify the tag exists on Docker Hub) [21]</td></tr>
 <tr><td>--model Qwen/Qwen3-4B-Instruct-2507</td><td>the model to download from Hugging Face and serve (Apache-2.0, no login needed) [22]</td></tr>
 <tr><td>--served-model-name qwen3-4b</td><td>the short name clients use (&quot;model&quot;: &quot;qwen3-4b&quot;); equals LLM_MODEL in .env</td></tr>
 <tr><td>--max-model-len 32768</td><td>the longest prompt + answer in tokens (our prompts are under 8,000)</td></tr>
 <tr><td>--gpu-memory-utilization 0.80</td><td>use at most 80% of the 48 GB, leaving room for Docling and other GPU work</td></tr>
-<tr><td>--api-key &quot;<span style="font-family:'Roboto Mono'">$</span>LLM_API_KEY&quot;</td><td>refuse every request without Authorization: Bearer YOUR_KEY</td></tr>
+<tr><td>--api-key &quot;<span style="font-family:'Roboto Mono',monospace">$</span>LLM_API_KEY&quot;</td><td>refuse every request without Authorization: Bearer YOUR_KEY</td></tr>
 <tr><td>echo ...</td><td>print a hint</td></tr>
 </table>
 <p><b>Step 6.</b> Start vLLM:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">bash scripts/start_vllm.sh</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">bash scripts/start_vllm.sh</pre>
 <p><b>You should see:</b> a long container id and &quot;vLLM is starting. Follow the log with: docker logs -f vllm&quot;. The first time, Docker downloads the image (about 10 GB, 3-8 minutes) before the id appears.</p>
 <p><b>Step 7.</b> Follow the log:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">docker logs -f vllm</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">docker logs -f vllm</pre>
 <p><b>Step 8.</b> Wait until the log shows &quot;Application startup complete.&quot; (first run: the model download adds 2-5 minutes).</p>
 <p><b>Step 9.</b> Press Ctrl+C to stop following the log (vLLM keeps running).</p>
 <p><b>Step 10.</b> Load your key into this terminal:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">export LLM_API_KEY=<span style="font-family:'Roboto Mono'">$</span>(grep &#x27;^LLM_API_KEY=&#x27; .env | cut -d= -f2)</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">export LLM_API_KEY=<span style="font-family:'Roboto Mono',monospace">$</span>(grep &#x27;^LLM_API_KEY=&#x27; .env | cut -d= -f2)</pre>
 <p><b>Step 11.</b> Ask vLLM which model it serves:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:8000/v1/models -H &quot;Authorization: Bearer <span style="font-family:'Roboto Mono'">$</span>LLM_API_KEY&quot; | jq -r &#x27;.data[0].id&#x27;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:8000/v1/models -H &quot;Authorization: Bearer <span style="font-family:'Roboto Mono',monospace">$</span>LLM_API_KEY&quot; | jq -r &#x27;.data[0].id&#x27;</pre>
 <p><b>You should see:</b> qwen3-4b</p>
 <p><b>Step 12.</b> Send a first chat message:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:8000/v1/chat/completions -H &quot;Authorization: Bearer <span style="font-family:'Roboto Mono'">$</span>LLM_API_KEY&quot; -H &quot;Content-Type: application/json&quot; -d &#x27;{&quot;model&quot;: &quot;qwen3-4b&quot;, &quot;messages&quot;: [{&quot;role&quot;: &quot;user&quot;, &quot;content&quot;: &quot;In one sentence, what is arXiv?&quot;}], &quot;max_tokens&quot;: 60}&#x27; | jq -r &#x27;.choices[0].message.content&#x27;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:8000/v1/chat/completions -H &quot;Authorization: Bearer <span style="font-family:'Roboto Mono',monospace">$</span>LLM_API_KEY&quot; -H &quot;Content-Type: application/json&quot; -d &#x27;{&quot;model&quot;: &quot;qwen3-4b&quot;, &quot;messages&quot;: [{&quot;role&quot;: &quot;user&quot;, &quot;content&quot;: &quot;In one sentence, what is arXiv?&quot;}], &quot;max_tokens&quot;: 60}&#x27; | jq -r &#x27;.choices[0].message.content&#x27;</pre>
 <p><b>You should see:</b> one sentence such as &quot;arXiv is a free online repository of research papers in physics, mathematics, computer science and related fields.&quot;</p>
 <p><b>Step 13.</b> Check GPU memory:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">nvidia-smi --query-gpu=memory.used,memory.total --format=csv</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">nvidia-smi --query-gpu=memory.used,memory.total --format=csv</pre>
 <p><b>You should see:</b> about 39000 MiB used of 49140 MiB (80%).</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>If you see...</b></td><td style="background-color:#e0e0e0"><b>It means...</b></td><td style="background-color:#e0e0e0"><b>Do this next</b></td></tr>
 <tr><td>{&quot;error&quot;:&quot;Unauthorized&quot;} or 401</td><td>the key in the request differs from the key vLLM started with</td><td>repeat Step 10; if you changed .env after Step 6, run Step 6 again</td></tr>
-<tr><td>curl: (7) Failed to connect</td><td>vLLM is still starting or crashed</td><td>run <span style="font-family:'Roboto Mono'">docker logs --tail 50 vllm</span> and wait for &quot;Application startup complete.&quot;</td></tr>
+<tr><td>curl: (7) Failed to connect</td><td>vLLM is still starting or crashed</td><td>run <span style="font-family:'Roboto Mono',monospace">docker logs --tail 50 vllm</span> and wait for &quot;Application startup complete.&quot;</td></tr>
 <tr><td>manifest for vllm/vllm-openai:v0.32.0 not found</td><td>that tag does not exist (yet)</td><td>open <a href="https://hub.docker.com/r/vllm/vllm-openai/tags">https://hub.docker.com/r/vllm/vllm-openai/tags</a>, pick the newest vX.Y.Z tag and change line 11 of start_vllm.sh</td></tr>
-<tr><td>CUDA out of memory</td><td>another program uses the GPU</td><td>run <span style="font-family:'Roboto Mono'">nvidia-smi</span> to see it; or lower 0.80 to 0.70 and repeat Step 6</td></tr>
+<tr><td>CUDA out of memory</td><td>another program uses the GPU</td><td>run <span style="font-family:'Roboto Mono',monospace">nvidia-smi</span> to see it; or lower 0.80 to 0.70 and repeat Step 6</td></tr>
 <tr><td>&quot;CUDA driver version is insufficient&quot;</td><td>the image needs a newer driver</td><td>deploy the VM with the &quot;R595 CUDA 13.2 with Docker&quot; image, or use an older vLLM tag</td></tr>
 </table>
 <p><b style="color:#bf1a1a">Watch out:</b> port 8000 is open on all VM addresses, but the Hyperstack firewall blocks it from the internet (only port 22 is open) and vLLM checks the API key. Keep it that way until Section 6B.12.</p>
@@ -535,7 +535,7 @@ echo &quot;vLLM is starting. Follow the log with: docker logs -f vllm&quot;</pre
 <p><b>Step 3.</b> Type start_opensearch.sh and press Enter.</p>
 <p><b>Step 4.</b> Paste the grey box below.</p>
 <p><b>Step 5.</b> Press Ctrl+S.</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">#!/usr/bin/env bash
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">#!/usr/bin/env bash
 # Start OpenSearch (search engine) on the VM, port 9200, data kept in a Docker volume.
 set -euo pipefail
 sudo sysctl -w vm.max_map_count=262144   # OpenSearch refuses to start without this
@@ -566,27 +566,27 @@ echo &quot;OpenSearch is starting. Test in 30 seconds with: curl -s localhost:92
 <tr><td>opensearchproject/opensearch:3.9.0</td><td>the official image; 3.x includes the k-NN and neural-search plugins that hybrid search needs [14][16]</td></tr>
 </table>
 <p><b>Step 6.</b> Make the memory setting permanent (it must survive reboots and Hyperstack restores):</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">echo &#x27;vm.max_map_count=262144&#x27; | sudo tee /etc/sysctl.d/99-opensearch.conf</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">echo &#x27;vm.max_map_count=262144&#x27; | sudo tee /etc/sysctl.d/99-opensearch.conf</pre>
 <p><b>You should see:</b> vm.max_map_count=262144</p>
 <p><b>Step 7.</b> Check that the Docker bridge address is 172.17.0.1:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">ip -4 addr show docker0 | grep inet</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">ip -4 addr show docker0 | grep inet</pre>
 <p><b>You should see:</b> inet 172.17.0.1/16 ...</p>
 <p><b>Step 8.</b> Start OpenSearch:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">bash scripts/start_opensearch.sh</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">bash scripts/start_opensearch.sh</pre>
 <p><b>You should see:</b> &quot;vm.max_map_count = 262144&quot;, a container id, and &quot;OpenSearch is starting...&quot;.</p>
 <p><b>Step 9.</b> Wait 30 seconds, then ask for its version:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:9200 | jq -r &#x27;.version.number&#x27;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:9200 | jq -r &#x27;.version.number&#x27;</pre>
 <p><b>You should see:</b> 3.9.0</p>
 <p><b>Step 10.</b> Check that the two plugins for hybrid search are there:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">curl -s &quot;localhost:9200/_cat/plugins?h=component&quot; | sort -u | grep -E &quot;knn|neural&quot;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">curl -s &quot;localhost:9200/_cat/plugins?h=component&quot; | sort -u | grep -E &quot;knn|neural&quot;</pre>
 <p><b>You should see:</b> opensearch-knn and opensearch-neural-search</p>
 <p><b>Step 11.</b> Check the cluster health:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:9200/_cluster/health | jq -r .status</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:9200/_cluster/health | jq -r .status</pre>
 <p><b>You should see:</b> green</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>If you see...</b></td><td style="background-color:#e0e0e0"><b>It means...</b></td><td style="background-color:#e0e0e0"><b>Do this next</b></td></tr>
 <tr><td>curl: (52) Empty reply or (7) Failed to connect</td><td>still starting</td><td>wait 30 more seconds and repeat Step 9</td></tr>
-<tr><td>the container stops: docker ps does not list opensearch</td><td>it crashed at start</td><td>run <span style="font-family:'Roboto Mono'">docker logs --tail 30 opensearch</span>; &quot;max virtual memory areas vm.max_map_count [65530] is too low&quot; = repeat Steps 6 and 8</td></tr>
+<tr><td>the container stops: docker ps does not list opensearch</td><td>it crashed at start</td><td>run <span style="font-family:'Roboto Mono',monospace">docker logs --tail 30 opensearch</span>; &quot;max virtual memory areas vm.max_map_count [65530] is too low&quot; = repeat Steps 6 and 8</td></tr>
 <tr><td>Step 7 shows another address, for example 172.18.0.1</td><td>your Docker bridge uses a different range</td><td>change 172.17.0.1 in line 8 of start_opensearch.sh to the address you saw and repeat Step 8 (and use that address wherever this manual says 172.17.0.1)</td></tr>
 <tr><td>yellow in Step 11</td><td>an index wants a replica copy on a second node</td><td>fine for a single node; Part 4 creates indexes with 0 replicas</td></tr>
 </table>
@@ -596,21 +596,21 @@ echo &quot;OpenSearch is starting. Test in 30 seconds with: curl -s localhost:92
 <p><b>GOAL:</b> the aws command works against FakeCloud now, and against real AWS when you choose, with one command to switch.</p>
 <p>BEFORE YOU START: what FakeCloud is. FakeCloud is an open-source program that pretends to be AWS on your own machine at <a href="http://localhost:4566">http://localhost:4566</a> [6]. You use the normal aws command; only the address changes. It supports S3, ECR (real docker push), IAM, STS, Secrets Manager, CloudWatch Logs and the ELBv2 load-balancer API. Its EKS is control plane only: it remembers the cluster you &quot;create&quot; but has no real Kubernetes inside, so in Part 6B you use kind for the real cluster [8]. It has no GPU; it is for practising the AWS steps for free.</p>
 <p><b>Step 1.</b> Download the AWS CLI v2 installer [44]:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">cd /tmp &amp;&amp; curl -s &quot;https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip&quot; -o awscliv2.zip</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">cd /tmp &amp;&amp; curl -s &quot;https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip&quot; -o awscliv2.zip</pre>
 <p><b>Step 2.</b> Unpack and install it:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">unzip -q awscliv2.zip &amp;&amp; sudo ./aws/install &amp;&amp; cd ~/querymesh</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">unzip -q awscliv2.zip &amp;&amp; sudo ./aws/install &amp;&amp; cd ~/querymesh</pre>
 <p><b>Step 3.</b> Check:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">aws --version</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">aws --version</pre>
 <p><b>You should see:</b> aws-cli/2.x.x Python/3.x Linux/...</p>
 <p><b>Step 4.</b> Install FakeCloud version 0.51.0 (pinned, so your results match this manual) [7]:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">curl -fsSL https://fakecloud.dev/install.sh | bash -s -- --version v0.51.0</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">curl -fsSL https://fakecloud.dev/install.sh | bash -s -- --version v0.51.0</pre>
 <p><b>You should see:</b> &quot;binary: /usr/local/bin/fakecloud&quot; and &quot;Start the emulator: fakecloud&quot;</p>
 <p><b>Step 5.</b> Create a folder for FakeCloud&#x27;s saved state:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">mkdir -p ~/fakecloud-data</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">mkdir -p ~/fakecloud-data</pre>
 <p><b>Step 6.</b> Start FakeCloud in the background:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">nohup fakecloud --storage-mode persistent --data-path ~/fakecloud-data &gt; ~/fakecloud.log 2&gt;&amp;1 &amp;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">nohup fakecloud --storage-mode persistent --data-path ~/fakecloud-data &gt; ~/fakecloud.log 2&gt;&amp;1 &amp;</pre>
 <p><b>Step 7.</b> Check it is healthy:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">curl -s http://localhost:4566/_fakecloud/health | head -c 120</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">curl -s http://localhost:4566/_fakecloud/health | head -c 120</pre>
 <p><b>You should see:</b> {&quot;status&quot;:&quot;ok&quot;,&quot;version&quot;:&quot;0.51.0&quot;,&quot;services&quot;:[...</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Piece</b></td><td style="background-color:#e0e0e0"><b>What it does</b></td></tr>
@@ -624,12 +624,12 @@ echo &quot;OpenSearch is starting. Test in 30 seconds with: curl -s localhost:92
 <p><b>Step 10.</b> Type use_fakecloud.sh and press Enter.</p>
 <p><b>Step 11.</b> Paste the grey box below.</p>
 <p><b>Step 12.</b> Press Ctrl+S.</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2"># Use FakeCloud (free AWS on this VM). Run with:  source scripts/use_fakecloud.sh
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2"># Use FakeCloud (free AWS on this VM). Run with:  source scripts/use_fakecloud.sh
 export AWS_ENDPOINT_URL=http://localhost:4566
 export AWS_ACCESS_KEY_ID=test
 export AWS_SECRET_ACCESS_KEY=test
 export AWS_DEFAULT_REGION=us-east-1
-echo &quot;Target: FakeCloud (<span style="font-family:'Roboto Mono'">$</span>AWS_ENDPOINT_URL)&quot;</pre>
+echo &quot;Target: FakeCloud (<span style="font-family:'Roboto Mono',monospace">$</span>AWS_ENDPOINT_URL)&quot;</pre>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Line</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
 <tr><td>export AWS_ENDPOINT_URL=<a href="http://localhost:4566">http://localhost:4566</a></td><td>the ONE variable that sends every aws command and every boto3 call to FakeCloud instead of Amazon</td></tr>
@@ -643,7 +643,7 @@ echo &quot;Target: FakeCloud (<span style="font-family:'Roboto Mono'">$</span>AW
 <p><b>Step 15.</b> Type use_aws.sh and press Enter.</p>
 <p><b>Step 16.</b> Paste the grey box below.</p>
 <p><b>Step 17.</b> Press Ctrl+S.</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2"># Use real AWS (the keys you saved with &quot;aws configure&quot;). Run with:  source scripts/use_aws.sh
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2"># Use real AWS (the keys you saved with &quot;aws configure&quot;). Run with:  source scripts/use_aws.sh
 unset AWS_ENDPOINT_URL AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
 export AWS_DEFAULT_REGION=us-east-1
 echo &quot;Target: REAL AWS - this costs money&quot;</pre>
@@ -659,12 +659,12 @@ echo &quot;Target: REAL AWS - this costs money&quot;</pre>
 <tr><td style="background-color:#e0e0e0"><b>Step</b></td><td style="background-color:#e0e0e0"><b>FakeCloud (free practice)</b></td><td style="background-color:#9fc5e8"><b>Real AWS (same step)</b></td></tr>
 <tr><td>1 Account</td><td>nothing to do: FakeCloud has one built-in account, 123456789012</td><td style="background-color:#cfe2f3">AWS console (<a href="https://console.aws.amazon.com">https://console.aws.amazon.com</a>) &gt; search IAM &gt; Users &gt; Create user &gt; User name querymesh-admin &gt; Next &gt; Attach policies directly &gt; tick AdministratorAccess &gt; Next &gt; Create user</td></tr>
 <tr><td>2 Access keys</td><td>nothing to do (any keys work)</td><td style="background-color:#cfe2f3">IAM &gt; Users &gt; querymesh-admin &gt; Security credentials tab &gt; Create access key &gt; Command Line Interface (CLI) &gt; tick the confirmation &gt; Next &gt; Create access key &gt; copy the Access key and the Secret access key into secrets.txt</td></tr>
-<tr><td>3 Save the keys on the VM</td><td>nothing to do</td><td style="background-color:#cfe2f3"><span style="font-family:'Roboto Mono'">aws configure</span> then paste the Access key ID, paste the Secret access key, type <span style="font-family:'Roboto Mono'">us-east-1</span>, type <span style="font-family:'Roboto Mono'">json</span></td></tr>
-<tr><td>4 Choose the target</td><td><span style="font-family:'Roboto Mono'">source scripts/use_fakecloud.sh</span></td><td style="background-color:#cfe2f3"><span style="font-family:'Roboto Mono'">source scripts/use_aws.sh</span></td></tr>
-<tr><td>5 Test who you are</td><td><span style="font-family:'Roboto Mono'">aws sts get-caller-identity</span></td><td style="background-color:#cfe2f3"><span style="font-family:'Roboto Mono'">aws sts get-caller-identity</span></td></tr>
+<tr><td>3 Save the keys on the VM</td><td>nothing to do</td><td style="background-color:#cfe2f3"><span style="font-family:'Roboto Mono',monospace">aws configure</span> then paste the Access key ID, paste the Secret access key, type <span style="font-family:'Roboto Mono',monospace">us-east-1</span>, type <span style="font-family:'Roboto Mono',monospace">json</span></td></tr>
+<tr><td>4 Choose the target</td><td><span style="font-family:'Roboto Mono',monospace">source scripts/use_fakecloud.sh</span></td><td style="background-color:#cfe2f3"><span style="font-family:'Roboto Mono',monospace">source scripts/use_aws.sh</span></td></tr>
+<tr><td>5 Test who you are</td><td><span style="font-family:'Roboto Mono',monospace">aws sts get-caller-identity</span></td><td style="background-color:#cfe2f3"><span style="font-family:'Roboto Mono',monospace">aws sts get-caller-identity</span></td></tr>
 <tr><td>You should see</td><td>&quot;Account&quot;: &quot;123456789012&quot; (FakeCloud&#x27;s fake account)</td><td style="background-color:#cfe2f3">your real 12-digit account number and &quot;arn:aws:iam::...:user/querymesh-admin&quot;</td></tr>
 <tr><td>6 Safety</td><td>nothing to do</td><td style="background-color:#cfe2f3">AWS console &gt; Billing and Cost Management &gt; Budgets &gt; Create budget &gt; Use a template &gt; Monthly cost budget &gt; Budgeted amount 10 &gt; your e-mail &gt; Create budget. Also enable MFA on the root user (account menu &gt; Security credentials &gt; Assign MFA device)</td></tr>
-<tr><td>7 Check the target any time</td><td><span style="font-family:'Roboto Mono'">echo <span style="font-family:'Roboto Mono'">$</span>AWS_ENDPOINT_URL</span> prints <a href="http://localhost:4566">http://localhost:4566</a></td><td style="background-color:#cfe2f3"><span style="font-family:'Roboto Mono'">echo <span style="font-family:'Roboto Mono'">$</span>AWS_ENDPOINT_URL</span> prints an empty line</td></tr>
+<tr><td>7 Check the target any time</td><td><span style="font-family:'Roboto Mono',monospace">echo <span style="font-family:'Roboto Mono',monospace">$</span>AWS_ENDPOINT_URL</span> prints <a href="http://localhost:4566">http://localhost:4566</a></td><td style="background-color:#cfe2f3"><span style="font-family:'Roboto Mono',monospace">echo <span style="font-family:'Roboto Mono',monospace">$</span>AWS_ENDPOINT_URL</span> prints an empty line</td></tr>
 </table>
 <p><b style="color:#bf1a1a">Watch out:</b> export lines only last for the current terminal. In a new terminal, run source scripts/use_fakecloud.sh (or use_aws.sh) again before any aws command.</p>
 <p><b style="color:#bf1a1a">Watch out:</b> never use root-user keys; never put access keys in code or Git. The .env file has only the fake test keys for FakeCloud.</p>
@@ -679,7 +679,7 @@ echo &quot;Target: REAL AWS - this costs money&quot;</pre>
 <p><b>Step 3.</b> Type .gitignore and press Enter.</p>
 <p><b>Step 4.</b> Paste the grey box below.</p>
 <p><b>Step 5.</b> Press Ctrl+S.</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">.venv/
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">.venv/
 .env
 data/
 __pycache__/
@@ -695,14 +695,14 @@ __pycache__/
 <tr><td>.logfire/</td><td>Logfire&#x27;s local credentials folder (Section 6A.5)</td></tr>
 </table>
 <p><b>Step 6.</b> Set your name and e-mail for Git (replace both):</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">git config --global user.name &quot;YOUR NAME&quot; &amp;&amp; git config --global user.email &quot;you@example.com&quot;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">git config --global user.name &quot;YOUR NAME&quot; &amp;&amp; git config --global user.email &quot;you@example.com&quot;</pre>
 <p><b>Step 7.</b> Start the repository with the branch name main:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">git init -b main</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">git init -b main</pre>
 <p><b>Step 8.</b> Add all files and make the first commit:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">git add . &amp;&amp; git commit -m &quot;QueryMesh skeleton: config, scripts, pyproject&quot;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">git add . &amp;&amp; git commit -m &quot;QueryMesh skeleton: config, scripts, pyproject&quot;</pre>
 <p><b>You should see:</b> &quot;[main (root-commit) ...] QueryMesh skeleton...&quot; and a list of files. .env must NOT be in that list.</p>
 <p><b>Step 9.</b> Check .env is ignored:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">git status --ignored | grep -E &quot;^\s+\.env<span style="font-family:'Roboto Mono'">$</span>&quot;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">git status --ignored | grep -E &quot;^\s+\.env<span style="font-family:'Roboto Mono',monospace">$</span>&quot;</pre>
 <p><b>You should see:</b> .env (listed under &quot;Ignored files&quot;)</p>
 <p>Now put the code on GitHub.</p>
 <p><b>Step 10.</b> In your browser open <a href="https://github.com/new">https://github.com/new</a></p>
@@ -711,9 +711,9 @@ __pycache__/
 <p><b>Step 13.</b> Leave &quot;Add a README file&quot; OFF (you already have files).</p>
 <p><b>Step 14.</b> Click Create repository.</p>
 <p><b>Step 15.</b> Back in the VS Code Terminal, create an SSH key for GitHub on the VM:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">ssh-keygen -t ed25519 -C &quot;querymesh-vm&quot; -f ~/.ssh/id_ed25519 -N &quot;&quot;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">ssh-keygen -t ed25519 -C &quot;querymesh-vm&quot; -f ~/.ssh/id_ed25519 -N &quot;&quot;</pre>
 <p><b>Step 16.</b> Print its public part:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">cat ~/.ssh/id_ed25519.pub</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">cat ~/.ssh/id_ed25519.pub</pre>
 <p><b>Step 17.</b> Select the whole line (ssh-ed25519 ... querymesh-vm) and copy it (Ctrl+C).</p>
 <p><b>Step 18.</b> In your browser open <a href="https://github.com/settings/keys">https://github.com/settings/keys</a></p>
 <p><b>Step 19.</b> Click New SSH key.</p>
@@ -721,13 +721,13 @@ __pycache__/
 <p><b>Step 21.</b> Click in Key and press Ctrl+V.</p>
 <p><b>Step 22.</b> Click Add SSH key.</p>
 <p><b>Step 23.</b> Back in the terminal, test the connection:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">ssh -T git@github.com</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">ssh -T git@github.com</pre>
 <p><b>Step 24.</b> If asked &quot;Are you sure you want to continue connecting&quot;, type yes and press Enter.</p>
 <p><b>You should see:</b> &quot;Hi GITHUB_USER! You&#x27;ve successfully authenticated, but GitHub does not provide shell access.&quot;</p>
 <p><b>Step 25.</b> Connect your folder to the GitHub repository (replace GITHUB_USER):</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">git remote add origin git@github.com:GITHUB_USER/querymesh.git</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">git remote add origin git@github.com:GITHUB_USER/querymesh.git</pre>
 <p><b>Step 26.</b> Upload:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">git push -u origin main</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">git push -u origin main</pre>
 <p><b>You should see:</b> &quot;Branch &#x27;main&#x27; set up to track remote branch &#x27;main&#x27; from &#x27;origin&#x27;.&quot;</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Placeholder</b></td><td style="background-color:#e0e0e0"><b>Replace with</b></td><td style="background-color:#e0e0e0"><b>Example</b></td></tr>
@@ -743,16 +743,16 @@ __pycache__/
 <p><b>Step 1.</b> Run each command in the table and compare with the Expected column.</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Check</b></td><td style="background-color:#e0e0e0"><b>Command</b></td><td style="background-color:#e0e0e0"><b>Expected</b></td></tr>
-<tr><td>GPU visible</td><td><span style="font-family:'Roboto Mono'">nvidia-smi --query-gpu=name --format=csv,noheader</span></td><td>NVIDIA RTX A6000</td></tr>
-<tr><td>environment active</td><td><span style="font-family:'Roboto Mono'">which python</span></td><td>/home/ubuntu/querymesh/.venv/bin/python</td></tr>
-<tr><td>libraries</td><td><span style="font-family:'Roboto Mono'">python -c &quot;import langgraph, fastmcp, a2a, docling; print(&#x27;ok&#x27;)&quot;</span></td><td>ok</td></tr>
-<tr><td>settings</td><td><span style="font-family:'Roboto Mono'">python -c &quot;from querymesh import config; print(config.LLM_MODEL)&quot;</span></td><td>qwen3-4b</td></tr>
-<tr><td>vLLM</td><td><span style="font-family:'Roboto Mono'">curl -s localhost:8000/v1/models -H &quot;Authorization: Bearer <span style="font-family:'Roboto Mono'">$</span>LLM_API_KEY&quot; | jq -r &#x27;.data[0].id&#x27;</span></td><td>qwen3-4b</td></tr>
-<tr><td>OpenSearch</td><td><span style="font-family:'Roboto Mono'">curl -s localhost:9200 | jq -r &#x27;.version.number&#x27;</span></td><td>3.9.0</td></tr>
-<tr><td>FakeCloud</td><td><span style="font-family:'Roboto Mono'">curl -s localhost:4566/_fakecloud/health | jq -r .status</span></td><td>ok</td></tr>
-<tr><td>AWS CLI</td><td><span style="font-family:'Roboto Mono'">aws --version</span></td><td>aws-cli/2...</td></tr>
-<tr><td>Git</td><td><span style="font-family:'Roboto Mono'">git log --oneline | head -1</span></td><td>your first commit</td></tr>
-<tr><td>tmux</td><td><span style="font-family:'Roboto Mono'">tmux ls</span></td><td>no error (or &quot;no server running&quot;)</td></tr>
+<tr><td>GPU visible</td><td><span style="font-family:'Roboto Mono',monospace">nvidia-smi --query-gpu=name --format=csv,noheader</span></td><td>NVIDIA RTX A6000</td></tr>
+<tr><td>environment active</td><td><span style="font-family:'Roboto Mono',monospace">which python</span></td><td>/home/ubuntu/querymesh/.venv/bin/python</td></tr>
+<tr><td>libraries</td><td><span style="font-family:'Roboto Mono',monospace">python -c &quot;import langgraph, fastmcp, a2a, docling; print(&#x27;ok&#x27;)&quot;</span></td><td>ok</td></tr>
+<tr><td>settings</td><td><span style="font-family:'Roboto Mono',monospace">python -c &quot;from querymesh import config; print(config.LLM_MODEL)&quot;</span></td><td>qwen3-4b</td></tr>
+<tr><td>vLLM</td><td><span style="font-family:'Roboto Mono',monospace">curl -s localhost:8000/v1/models -H &quot;Authorization: Bearer <span style="font-family:'Roboto Mono',monospace">$</span>LLM_API_KEY&quot; | jq -r &#x27;.data[0].id&#x27;</span></td><td>qwen3-4b</td></tr>
+<tr><td>OpenSearch</td><td><span style="font-family:'Roboto Mono',monospace">curl -s localhost:9200 | jq -r &#x27;.version.number&#x27;</span></td><td>3.9.0</td></tr>
+<tr><td>FakeCloud</td><td><span style="font-family:'Roboto Mono',monospace">curl -s localhost:4566/_fakecloud/health | jq -r .status</span></td><td>ok</td></tr>
+<tr><td>AWS CLI</td><td><span style="font-family:'Roboto Mono',monospace">aws --version</span></td><td>aws-cli/2...</td></tr>
+<tr><td>Git</td><td><span style="font-family:'Roboto Mono',monospace">git log --oneline | head -1</span></td><td>your first commit</td></tr>
+<tr><td>tmux</td><td><span style="font-family:'Roboto Mono',monospace">tmux ls</span></td><td>no error (or &quot;no server running&quot;)</td></tr>
 </table>
 <p><b style="color:#bf1a1a">Watch out:</b> if the vLLM row prints nothing, the variable LLM_API_KEY is not set in this terminal: run the export line from Section 2B.10 Step 10 first.</p>
 <p><b style="color:#1a7333">CHECKPOINT:</b> every row matches. Read QM Part 3 - Core Idea next (no typing), then start QM Part 4.</p>

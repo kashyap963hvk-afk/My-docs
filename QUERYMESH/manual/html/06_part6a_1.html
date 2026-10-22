@@ -1,7 +1,7 @@
-<html><head><meta charset="utf-8"></head><body style="font-family:Arial">
+<html><head><meta charset="utf-8"></head><body>
 <h1>PART 6A - ADVANCED: agents as FastMCP + A2A servers, tracing, a JWT-protected API, and two user interfaces</h1>
 <p>This part builds four lines of the QueryMesh project: (6) every agent exposes a FastMCP server with SSE transport and talks to its peers with the A2A protocol, (7) Logfire span tracing and Langfuse Cloud token tracking, (9) a Telegram bot and a Gradio web UI that stream the answer, and the JWT authentication part of line (11).</p>
-<p>You start from the result of Part 5: <span style="font-family:'Roboto Mono'">python -m querymesh.graph &quot;...&quot;</span> runs the five agents inside ONE Python process. In this part each agent becomes its own small web server, exactly like microservices in a company.</p>
+<p>You start from the result of Part 5: <span style="font-family:'Roboto Mono',monospace">python -m querymesh.graph &quot;...&quot;</span> runs the five agents inside ONE Python process. In this part each agent becomes its own small web server, exactly like microservices in a company.</p>
 <h2>BEFORE YOU START: the words of this part</h2>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Word</b></td><td style="background-color:#e0e0e0"><b>Plain meaning</b></td></tr>
@@ -28,18 +28,18 @@
 <p><b>Why:</b> separate servers can be scaled, restarted and updated one by one (in Part 6B Kubernetes runs each as its own Deployment). Standard protocols (MCP, A2A) mean any MCP- or A2A-speaking program can use your agents, not only your own supervisor.</p>
 <p><b>When:</b> split into services when several people or programs use the system, or when one agent needs more machines than another. For a single script, Part 5&#x27;s local mode is simpler (and stays available with WORKER_MODE=local).</p>
 <p>How the pieces talk:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">Gradio / Telegram --HTTP + JWT--&gt; API :8090 --(cache hit? return)--&gt; supervisor (LangGraph)
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">Gradio / Telegram --HTTP + JWT--&gt; API :8090 --(cache hit? return)--&gt; supervisor (LangGraph)
 supervisor --MCP over SSE--&gt; retriever :8101 | grader :8102 | writer :8103 | critic :8104 | scout :8105
 retriever --A2A (peer delegation)--&gt; scout          everyone --spans--&gt; Logfire    LLM calls --tokens--&gt; Langfuse</pre>
 <h2>SECTION 6A.1 - Create querymesh/discovery.py (Agent Cards, discovery, delegation)</h2>
-<p><b>WHERE:</b> VS Code Explorer, folder <span style="font-family:'Roboto Mono'">querymesh</span></p>
+<p><b>WHERE:</b> VS Code Explorer, folder <span style="font-family:'Roboto Mono',monospace">querymesh</span></p>
 <p><b>GOAL:</b> four helpers: download an Agent Card, build the skill phone book for the supervisor, find a peer that offers a skill, and send a task to a peer over A2A.</p>
-<p><b>Step 1.</b> Right-click the folder <span style="font-family:'Roboto Mono'">querymesh</span>.</p>
+<p><b>Step 1.</b> Right-click the folder <span style="font-family:'Roboto Mono',monospace">querymesh</span>.</p>
 <p><b>Step 2.</b> Click <b>New File...</b>.</p>
-<p><b>Step 3.</b> Type <span style="font-family:'Roboto Mono'">discovery.py</span> and press Enter.</p>
+<p><b>Step 3.</b> Type <span style="font-family:'Roboto Mono',monospace">discovery.py</span> and press Enter.</p>
 <p><b>Step 4.</b> Paste the grey box below.</p>
 <p><b>Step 5.</b> Press Ctrl+S.</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;A2A helpers: discover agents from their Agent Cards, and delegate work to a peer agent.&quot;&quot;&quot;
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;A2A helpers: discover agents from their Agent Cards, and delegate work to a peer agent.&quot;&quot;&quot;
 import json
 
 import httpx
@@ -91,35 +91,35 @@ async def delegate(base_url: str, payload: dict) -&gt; dict:
     return result</pre>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">from a2a.client import A2ACardResolver, AgentCardResolutionError, ClientConfig, create_client</span></td><td>the A2A client tools: a card downloader, the error it raises when a card cannot be fetched, client settings, and a factory that builds the right client for an agent</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">from a2a.helpers import new_text_message</span></td><td>builds an A2A message from plain text</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">from a2a.types import Role, SendMessageRequest</span></td><td>Role.ROLE_USER marks the message as coming from the caller; SendMessageRequest wraps it</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">async def fetch_card(base_url)</span></td><td>downloads <a href="http://AGENT/.well-known/agent-card.json">http://AGENT/.well-known/agent-card.json</a> and turns it into an AgentCard object</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">httpx.AsyncClient(timeout=10)</span></td><td>wait at most 10 seconds for an agent</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">async def discover_agents(base_urls)</span></td><td>agent discovery for the supervisor: for every URL in AGENT_URLS, read the card and note &quot;skill id -&gt; MCP address&quot;</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">registry[skill.id] = base_url.rstrip(&quot;/&quot;) + &quot;/mcp/sse&quot;</span></td><td>e.g. &quot;retrieve&quot; -&gt; &quot;<a href="http://localhost:8101/mcp/sse">http://localhost:8101/mcp/sse</a>&quot;. rstrip removes a trailing slash so we never get //</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">async def find_peer(base_urls, skill_id)</span></td><td>used by an agent to find a colleague, e.g. the retriever looking for whoever offers &quot;scout&quot;</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">except AgentCardResolutionError: continue</span></td><td>if one agent is down or is not an A2A agent, skip it and keep looking (A2ACardResolver wraps connection errors in this error type)</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">if any(skill.id == skill_id for skill in card.skills): return base_url</span></td><td>found the colleague: return its address</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">async def delegate(base_url, payload)</span></td><td>peer delegation: send a task to another agent over A2A and wait for the result</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">create_client(agent=card, client_config=ClientConfig(streaming=False))</span></td><td>builds a client that talks the protocol written in the card (JSON-RPC at /a2a); no streaming, we wait for the full result</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">new_text_message(json.dumps(payload), role=Role.ROLE_USER)</span></td><td>our arguments travel as JSON text inside the A2A message</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">async for response in client.send_message(request)</span></td><td>the agent answers with one or more responses; the last one holds the finished task</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">response.HasField(&quot;task&quot;) and response.task.artifacts</span></td><td>A2A 1.0 uses protobuf objects; HasField checks the response contains a task with at least one artifact (a result)</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">json.loads(response.task.artifacts[0].parts[0].text)</span></td><td>the artifact text is the JSON result the agent produced</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">finally: await client.close()</span></td><td>always close the connection, even after an error</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">from a2a.client import A2ACardResolver, AgentCardResolutionError, ClientConfig, create_client</span></td><td>the A2A client tools: a card downloader, the error it raises when a card cannot be fetched, client settings, and a factory that builds the right client for an agent</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">from a2a.helpers import new_text_message</span></td><td>builds an A2A message from plain text</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">from a2a.types import Role, SendMessageRequest</span></td><td>Role.ROLE_USER marks the message as coming from the caller; SendMessageRequest wraps it</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">async def fetch_card(base_url)</span></td><td>downloads <a href="http://AGENT/.well-known/agent-card.json">http://AGENT/.well-known/agent-card.json</a> and turns it into an AgentCard object</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">httpx.AsyncClient(timeout=10)</span></td><td>wait at most 10 seconds for an agent</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">async def discover_agents(base_urls)</span></td><td>agent discovery for the supervisor: for every URL in AGENT_URLS, read the card and note &quot;skill id -&gt; MCP address&quot;</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">registry[skill.id] = base_url.rstrip(&quot;/&quot;) + &quot;/mcp/sse&quot;</span></td><td>e.g. &quot;retrieve&quot; -&gt; &quot;<a href="http://localhost:8101/mcp/sse">http://localhost:8101/mcp/sse</a>&quot;. rstrip removes a trailing slash so we never get //</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">async def find_peer(base_urls, skill_id)</span></td><td>used by an agent to find a colleague, e.g. the retriever looking for whoever offers &quot;scout&quot;</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">except AgentCardResolutionError: continue</span></td><td>if one agent is down or is not an A2A agent, skip it and keep looking (A2ACardResolver wraps connection errors in this error type)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">if any(skill.id == skill_id for skill in card.skills): return base_url</span></td><td>found the colleague: return its address</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">async def delegate(base_url, payload)</span></td><td>peer delegation: send a task to another agent over A2A and wait for the result</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">create_client(agent=card, client_config=ClientConfig(streaming=False))</span></td><td>builds a client that talks the protocol written in the card (JSON-RPC at /a2a); no streaming, we wait for the full result</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">new_text_message(json.dumps(payload), role=Role.ROLE_USER)</span></td><td>our arguments travel as JSON text inside the A2A message</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">async for response in client.send_message(request)</span></td><td>the agent answers with one or more responses; the last one holds the finished task</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">response.HasField(&quot;task&quot;) and response.task.artifacts</span></td><td>A2A 1.0 uses protobuf objects; HasField checks the response contains a task with at least one artifact (a result)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">json.loads(response.task.artifacts[0].parts[0].text)</span></td><td>the artifact text is the JSON result the agent produced</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">finally: await client.close()</span></td><td>always close the connection, even after an error</td></tr>
 </table>
-<p><b style="color:#1a7333">CHECKPOINT:</b> <span style="font-family:'Roboto Mono'">python -c &quot;import querymesh.discovery&quot;</span> prints nothing (no error).</p>
-<p><b>If not:</b> an ImportError for a2a means the venv is not active: <span style="font-family:'Roboto Mono'">source .venv/bin/activate</span>.</p>
+<p><b style="color:#1a7333">CHECKPOINT:</b> <span style="font-family:'Roboto Mono',monospace">python -c &quot;import querymesh.discovery&quot;</span> prints nothing (no error).</p>
+<p><b>If not:</b> an ImportError for a2a means the venv is not active: <span style="font-family:'Roboto Mono',monospace">source .venv/bin/activate</span>.</p>
 <h2>SECTION 6A.2 - Create querymesh/agents.py (the five FastMCP + A2A servers)</h2>
-<p><b>WHERE:</b> VS Code Explorer, folder <span style="font-family:'Roboto Mono'">querymesh</span></p>
+<p><b>WHERE:</b> VS Code Explorer, folder <span style="font-family:'Roboto Mono',monospace">querymesh</span></p>
 <p><b>GOAL:</b> one file that can start any of the five agents. Each agent server has /healthz, an Agent Card, an A2A endpoint at /a2a and an MCP server with SSE transport at /mcp/sse.</p>
-<p><b>Step 1.</b> Right-click the folder <span style="font-family:'Roboto Mono'">querymesh</span>.</p>
+<p><b>Step 1.</b> Right-click the folder <span style="font-family:'Roboto Mono',monospace">querymesh</span>.</p>
 <p><b>Step 2.</b> Click <b>New File...</b>.</p>
-<p><b>Step 3.</b> Type <span style="font-family:'Roboto Mono'">agents.py</span> and press Enter.</p>
+<p><b>Step 3.</b> Type <span style="font-family:'Roboto Mono',monospace">agents.py</span> and press Enter.</p>
 <p><b>Step 4.</b> Paste the grey box below.</p>
 <p><b>Step 5.</b> Press Ctrl+S.</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;The five agent servers. Each one exposes the same skill twice:
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;The five agent servers. Each one exposes the same skill twice:
   - as an MCP tool over SSE at /mcp/sse        (the supervisor calls it)
   - as an A2A agent at /a2a + an Agent Card     (other agents discover it and delegate to it)
 Run one with:  python -m querymesh.agents retriever
@@ -253,82 +253,82 @@ if __name__ == &quot;__main__&quot;:
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
 <tr><td>the docstring at the top</td><td>explains the double exposure: MCP for the supervisor, A2A for peers, and how to start one agent</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">import uvicorn</span></td><td>the web server program that runs our app</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">from a2a.helpers import get_message_text, new_task_from_user_message, new_text_message, new_text_part</span></td><td>helpers to read the incoming message and to build the task, status message and result</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">from a2a.server.agent_execution import AgentExecutor, RequestContext</span></td><td>the base class for &quot;what happens when an A2A request arrives&quot;, and the request details</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">from a2a.server.events import EventQueue</span></td><td>the queue where our agent puts progress and results for the caller</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">from a2a.server.request_handlers import DefaultRequestHandler</span></td><td>standard A2A request handling (tasks, statuses)</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">from a2a.server.routes import create_agent_card_routes, create_jsonrpc_routes</span></td><td>web routes for the Agent Card and for the JSON-RPC endpoint</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">from a2a.server.tasks import InMemoryTaskStore, TaskUpdater</span></td><td>keeps tasks in memory; TaskUpdater sends artifacts and status changes</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill, TaskState</span></td><td>the pieces of an Agent Card and the task states</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">from fastmcp import FastMCP</span></td><td>the MCP server class</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">from starlette...</span></td><td>Starlette is the small web framework that holds everything together (FastAPI is built on it)</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">PEER_MIN_HITS = 3</span></td><td>if the retriever finds fewer than 3 chunks, it asks the scout for help</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">async def retrieve(query, k=8)</span></td><td>the Retriever&#x27;s MCP tool. The type hints (str, int) become the tool&#x27;s input schema automatically; the docstring becomes the tool description</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">await asyncio.to_thread(skills.retrieve, query, k)</span></td><td>run the normal search function in a helper thread so the server can serve other requests meanwhile</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">scout_url = await find_peer(config.AGENT_URLS, &quot;scout&quot;)</span></td><td>agent discovery: read the cards and find who offers &quot;scout&quot;</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">await delegate(scout_url, {&quot;topic&quot;: query, &quot;max_papers&quot;: 5})</span></td><td>A2A peer delegation: the retriever asks the scout directly to fetch 5 fresh papers</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">hits = await asyncio.to_thread(skills.retrieve, query, k)</span></td><td>search again, now including the new papers</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">async def grade / write / critic / scout</span></td><td>the other four tools: thin async wrappers around the Part 5 skills</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">AGENTS = {...}</span></td><td>the table of all agents: name -&gt; port, tool function, one-line description</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">class SkillExecutor(AgentExecutor)</span></td><td>what an agent does when an A2A message arrives</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">task = context.current_task or new_task_from_user_message(context.message)</span></td><td>continue an existing task, or start a new one from the incoming message</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">await event_queue.enqueue_event(task)</span></td><td>tell the caller &quot;task created&quot;</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">arguments = json.loads(get_message_text(context.message) or &quot;{}&quot;)</span></td><td>the message text is JSON arguments, e.g. {&quot;topic&quot;: &quot;...&quot;, &quot;max_papers&quot;: 5}</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">result = await self.tool(**arguments)</span></td><td>run the same tool the MCP server offers</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">updater.add_artifact(parts=[new_text_part(text=json.dumps(result), media_type=&quot;application/json&quot;)])</span></td><td>attach the result to the task as JSON text</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">updater.update_status(state=TaskState.TASK_STATE_COMPLETED, ...)</span></td><td>mark the task finished</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">async def cancel(...): raise NotImplementedError</span></td><td>cancelling is not supported; our tasks are short</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">def build_app(name)</span></td><td>builds the complete web app for one agent</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">skill_id = spec[&quot;tool&quot;].__name__</span></td><td>the tool&#x27;s function name (&quot;retrieve&quot;, &quot;grade&quot;, ...) becomes both the MCP tool name and the A2A skill id</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">public_url = os.getenv(&quot;PUBLIC_URL&quot;, f&quot;<a href="http://localhost:{spec[">http://localhost:{spec[</a>&#x27;port&#x27;]}&quot;)</span></td><td>the address written into the Agent Card. On the VM it is localhost; in Docker/Kubernetes it is the service name (Part 6B sets PUBLIC_URL)</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">mcp = FastMCP(f&quot;querymesh-{name}&quot;)</span> and <span style="font-family:'Roboto Mono'">mcp.tool(spec[&quot;tool&quot;])</span></td><td>create the MCP server and register the tool</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">mcp.http_app(transport=&quot;sse&quot;, path=&quot;/sse&quot;)</span></td><td>turn the MCP server into a web app that uses the SSE transport</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">card = AgentCard(...)</span></td><td>the agent&#x27;s business card: name, description, version, input/output types (JSON), capabilities (no streaming), the JSON-RPC address /a2a with protocol version 1.0, and one skill</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">DefaultRequestHandler(agent_executor=SkillExecutor(spec[&quot;tool&quot;]), task_store=InMemoryTaskStore(), agent_card=card)</span></td><td>wires the executor, the task memory and the card together</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">Route(&quot;/healthz&quot;, healthz)</span></td><td>a tiny &quot;I am alive&quot; page for Docker and Kubernetes health checks</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">*create_agent_card_routes(card)</span></td><td>serves the card at /.well-known/agent-card.json</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">*create_jsonrpc_routes(handler, &quot;/a2a&quot;)</span></td><td>the A2A endpoint</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">Mount(&quot;/mcp&quot;, app=mcp_app)</span></td><td>the MCP app lives under /mcp, so its SSE endpoint is /mcp/sse (and messages go to /mcp/messages/)</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">Starlette(routes=routes, lifespan=mcp_app.lifespan)</span></td><td>one app with all routes; the MCP app&#x27;s start-up/shut-down hooks must be passed on, or MCP sessions do not start</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">agent_name = sys.argv[1] if len(sys.argv) &gt; 1 else &quot;retriever&quot;</span></td><td>the first word after the command chooses the agent</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">observability.setup(f&quot;querymesh-{agent_name}&quot;)</span></td><td>each agent appears in Logfire under its own service name</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">port = int(os.getenv(&quot;PORT&quot;, AGENTS[agent_name][&quot;port&quot;]))</span></td><td>the port from the table, unless PORT is set</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">uvicorn.run(build_app(agent_name), host=&quot;0.0.0.0&quot;, port=port)</span></td><td>start the server on all network interfaces of the VM (the Hyperstack firewall still blocks these ports from the internet)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">import uvicorn</span></td><td>the web server program that runs our app</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">from a2a.helpers import get_message_text, new_task_from_user_message, new_text_message, new_text_part</span></td><td>helpers to read the incoming message and to build the task, status message and result</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">from a2a.server.agent_execution import AgentExecutor, RequestContext</span></td><td>the base class for &quot;what happens when an A2A request arrives&quot;, and the request details</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">from a2a.server.events import EventQueue</span></td><td>the queue where our agent puts progress and results for the caller</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">from a2a.server.request_handlers import DefaultRequestHandler</span></td><td>standard A2A request handling (tasks, statuses)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">from a2a.server.routes import create_agent_card_routes, create_jsonrpc_routes</span></td><td>web routes for the Agent Card and for the JSON-RPC endpoint</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">from a2a.server.tasks import InMemoryTaskStore, TaskUpdater</span></td><td>keeps tasks in memory; TaskUpdater sends artifacts and status changes</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill, TaskState</span></td><td>the pieces of an Agent Card and the task states</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">from fastmcp import FastMCP</span></td><td>the MCP server class</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">from starlette...</span></td><td>Starlette is the small web framework that holds everything together (FastAPI is built on it)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">PEER_MIN_HITS = 3</span></td><td>if the retriever finds fewer than 3 chunks, it asks the scout for help</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">async def retrieve(query, k=8)</span></td><td>the Retriever&#x27;s MCP tool. The type hints (str, int) become the tool&#x27;s input schema automatically; the docstring becomes the tool description</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">await asyncio.to_thread(skills.retrieve, query, k)</span></td><td>run the normal search function in a helper thread so the server can serve other requests meanwhile</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">scout_url = await find_peer(config.AGENT_URLS, &quot;scout&quot;)</span></td><td>agent discovery: read the cards and find who offers &quot;scout&quot;</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">await delegate(scout_url, {&quot;topic&quot;: query, &quot;max_papers&quot;: 5})</span></td><td>A2A peer delegation: the retriever asks the scout directly to fetch 5 fresh papers</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">hits = await asyncio.to_thread(skills.retrieve, query, k)</span></td><td>search again, now including the new papers</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">async def grade / write / critic / scout</span></td><td>the other four tools: thin async wrappers around the Part 5 skills</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">AGENTS = {...}</span></td><td>the table of all agents: name -&gt; port, tool function, one-line description</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">class SkillExecutor(AgentExecutor)</span></td><td>what an agent does when an A2A message arrives</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">task = context.current_task or new_task_from_user_message(context.message)</span></td><td>continue an existing task, or start a new one from the incoming message</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">await event_queue.enqueue_event(task)</span></td><td>tell the caller &quot;task created&quot;</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">arguments = json.loads(get_message_text(context.message) or &quot;{}&quot;)</span></td><td>the message text is JSON arguments, e.g. {&quot;topic&quot;: &quot;...&quot;, &quot;max_papers&quot;: 5}</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">result = await self.tool(**arguments)</span></td><td>run the same tool the MCP server offers</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">updater.add_artifact(parts=[new_text_part(text=json.dumps(result), media_type=&quot;application/json&quot;)])</span></td><td>attach the result to the task as JSON text</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">updater.update_status(state=TaskState.TASK_STATE_COMPLETED, ...)</span></td><td>mark the task finished</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">async def cancel(...): raise NotImplementedError</span></td><td>cancelling is not supported; our tasks are short</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">def build_app(name)</span></td><td>builds the complete web app for one agent</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">skill_id = spec[&quot;tool&quot;].__name__</span></td><td>the tool&#x27;s function name (&quot;retrieve&quot;, &quot;grade&quot;, ...) becomes both the MCP tool name and the A2A skill id</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">public_url = os.getenv(&quot;PUBLIC_URL&quot;, f&quot;<a href="http://localhost:{spec[">http://localhost:{spec[</a>&#x27;port&#x27;]}&quot;)</span></td><td>the address written into the Agent Card. On the VM it is localhost; in Docker/Kubernetes it is the service name (Part 6B sets PUBLIC_URL)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">mcp = FastMCP(f&quot;querymesh-{name}&quot;)</span> and <span style="font-family:'Roboto Mono',monospace">mcp.tool(spec[&quot;tool&quot;])</span></td><td>create the MCP server and register the tool</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">mcp.http_app(transport=&quot;sse&quot;, path=&quot;/sse&quot;)</span></td><td>turn the MCP server into a web app that uses the SSE transport</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">card = AgentCard(...)</span></td><td>the agent&#x27;s business card: name, description, version, input/output types (JSON), capabilities (no streaming), the JSON-RPC address /a2a with protocol version 1.0, and one skill</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">DefaultRequestHandler(agent_executor=SkillExecutor(spec[&quot;tool&quot;]), task_store=InMemoryTaskStore(), agent_card=card)</span></td><td>wires the executor, the task memory and the card together</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">Route(&quot;/healthz&quot;, healthz)</span></td><td>a tiny &quot;I am alive&quot; page for Docker and Kubernetes health checks</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">*create_agent_card_routes(card)</span></td><td>serves the card at /.well-known/agent-card.json</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">*create_jsonrpc_routes(handler, &quot;/a2a&quot;)</span></td><td>the A2A endpoint</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">Mount(&quot;/mcp&quot;, app=mcp_app)</span></td><td>the MCP app lives under /mcp, so its SSE endpoint is /mcp/sse (and messages go to /mcp/messages/)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">Starlette(routes=routes, lifespan=mcp_app.lifespan)</span></td><td>one app with all routes; the MCP app&#x27;s start-up/shut-down hooks must be passed on, or MCP sessions do not start</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">agent_name = sys.argv[1] if len(sys.argv) &gt; 1 else &quot;retriever&quot;</span></td><td>the first word after the command chooses the agent</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">observability.setup(f&quot;querymesh-{agent_name}&quot;)</span></td><td>each agent appears in Logfire under its own service name</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">port = int(os.getenv(&quot;PORT&quot;, AGENTS[agent_name][&quot;port&quot;]))</span></td><td>the port from the table, unless PORT is set</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">uvicorn.run(build_app(agent_name), host=&quot;0.0.0.0&quot;, port=port)</span></td><td>start the server on all network interfaces of the VM (the Hyperstack firewall still blocks these ports from the internet)</td></tr>
 </table>
-<p><b style="color:#1a7333">CHECKPOINT:</b> <span style="font-family:'Roboto Mono'">python -c &quot;from querymesh.agents import build_app; build_app(&#x27;grader&#x27;); print(&#x27;ok&#x27;)&quot;</span> prints ok.</p>
+<p><b style="color:#1a7333">CHECKPOINT:</b> <span style="font-family:'Roboto Mono',monospace">python -c &quot;from querymesh.agents import build_app; build_app(&#x27;grader&#x27;); print(&#x27;ok&#x27;)&quot;</span> prints ok.</p>
 <p><b>If not:</b> compare the file with the grey box; a typo in an import is the usual cause.</p>
 <h2>SECTION 6A.3 - Start the five agents and check them (Agent Card, MCP, A2A)</h2>
-<p><b>WHERE:</b> VS Code Terminal, folder <span style="font-family:'Roboto Mono'">~/querymesh</span>, venv active</p>
+<p><b>WHERE:</b> VS Code Terminal, folder <span style="font-family:'Roboto Mono',monospace">~/querymesh</span>, venv active</p>
 <p><b>GOAL:</b> five agent servers running in one tmux session (they keep running when VS Code disconnects), each answering on its Agent Card, its MCP tool and A2A.</p>
 <p><b>Step 1.</b> Start the tmux session with the first agent (retriever):</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">tmux new-session -d -s agents -n retriever &quot;cd ~/querymesh &amp;&amp; .venv/bin/python -m querymesh.agents retriever; bash&quot;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">tmux new-session -d -s agents -n retriever &quot;cd ~/querymesh &amp;&amp; .venv/bin/python -m querymesh.agents retriever; bash&quot;</pre>
 <p><b>Step 2.</b> Add the grader in a second window:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">tmux new-window -t agents -n grader &quot;cd ~/querymesh &amp;&amp; .venv/bin/python -m querymesh.agents grader; bash&quot;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">tmux new-window -t agents -n grader &quot;cd ~/querymesh &amp;&amp; .venv/bin/python -m querymesh.agents grader; bash&quot;</pre>
 <p><b>Step 3.</b> Add the writer:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">tmux new-window -t agents -n writer &quot;cd ~/querymesh &amp;&amp; .venv/bin/python -m querymesh.agents writer; bash&quot;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">tmux new-window -t agents -n writer &quot;cd ~/querymesh &amp;&amp; .venv/bin/python -m querymesh.agents writer; bash&quot;</pre>
 <p><b>Step 4.</b> Add the critic:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">tmux new-window -t agents -n critic &quot;cd ~/querymesh &amp;&amp; .venv/bin/python -m querymesh.agents critic; bash&quot;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">tmux new-window -t agents -n critic &quot;cd ~/querymesh &amp;&amp; .venv/bin/python -m querymesh.agents critic; bash&quot;</pre>
 <p><b>Step 5.</b> Add the scout:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">tmux new-window -t agents -n scout &quot;cd ~/querymesh &amp;&amp; .venv/bin/python -m querymesh.agents scout; bash&quot;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">tmux new-window -t agents -n scout &quot;cd ~/querymesh &amp;&amp; .venv/bin/python -m querymesh.agents scout; bash&quot;</pre>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Piece</b></td><td style="background-color:#e0e0e0"><b>What it does</b></td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">tmux new-session -d -s agents -n retriever &quot;...&quot;</span></td><td>create a session called agents, detached (-d, in the background), with a first window called retriever that runs the command</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">tmux new-window -t agents -n grader &quot;...&quot;</span></td><td>add a window called grader to the session agents</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">; bash</span> at the end</td><td>if the agent crashes, the window stays open with a shell, so you can read the error</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">tmux new-session -d -s agents -n retriever &quot;...&quot;</span></td><td>create a session called agents, detached (-d, in the background), with a first window called retriever that runs the command</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">tmux new-window -t agents -n grader &quot;...&quot;</span></td><td>add a window called grader to the session agents</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">; bash</span> at the end</td><td>if the agent crashes, the window stays open with a shell, so you can read the error</td></tr>
 </table>
 <p><b>Step 6.</b> Wait 5 seconds, then check all five health pages:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">for p in 8101 8102 8103 8104 8105; do curl -s localhost:<span style="font-family:'Roboto Mono'">$</span>p/healthz; echo; done</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">for p in 8101 8102 8103 8104 8105; do curl -s localhost:<span style="font-family:'Roboto Mono',monospace">$</span>p/healthz; echo; done</pre>
 <p><b>You should see:</b></p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">{&quot;status&quot;:&quot;ok&quot;,&quot;agent&quot;:&quot;retriever&quot;}
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">{&quot;status&quot;:&quot;ok&quot;,&quot;agent&quot;:&quot;retriever&quot;}
 {&quot;status&quot;:&quot;ok&quot;,&quot;agent&quot;:&quot;grader&quot;}
 {&quot;status&quot;:&quot;ok&quot;,&quot;agent&quot;:&quot;writer&quot;}
 {&quot;status&quot;:&quot;ok&quot;,&quot;agent&quot;:&quot;critic&quot;}
 {&quot;status&quot;:&quot;ok&quot;,&quot;agent&quot;:&quot;scout&quot;}</pre>
 <p><b>Step 7.</b> Read the retriever&#x27;s Agent Card:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:8101/.well-known/agent-card.json | jq .</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:8101/.well-known/agent-card.json | jq .</pre>
 <p>You should see (shortened):</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">{
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">{
   &quot;name&quot;: &quot;querymesh-retriever&quot;,
   &quot;description&quot;: &quot;Finds arXiv passages with hybrid search&quot;,
   &quot;supportedInterfaces&quot;: [{&quot;url&quot;: &quot;http://localhost:8101/a2a&quot;, &quot;protocolBinding&quot;: &quot;JSONRPC&quot;, &quot;protocolVersion&quot;: &quot;1.0&quot;}],
@@ -338,7 +338,7 @@ if __name__ == &quot;__main__&quot;:
   &quot;skills&quot;: [{&quot;id&quot;: &quot;retrieve&quot;, &quot;name&quot;: &quot;retrieve&quot;, &quot;description&quot;: &quot;Finds arXiv passages with hybrid search&quot;, &quot;tags&quot;: [&quot;querymesh&quot;]}]
 }</pre>
 <p><b>Step 8.</b> Call the retriever&#x27;s MCP tool over SSE with a small FastMCP client (paste the whole block at once):</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">python - &lt;&lt;&#x27;EOF&#x27;
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">python - &lt;&lt;&#x27;EOF&#x27;
 import asyncio
 from fastmcp import Client
 
@@ -353,51 +353,51 @@ EOF</pre>
 <p><b>You should see:</b> [&#x27;retrieve&#x27;] and then a list of 3 arXiv ids.</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Piece</b></td><td style="background-color:#e0e0e0"><b>What it does</b></td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">python - &lt;&lt;&#x27;EOF&#x27; ... EOF</span></td><td>runs the Python lines between the two EOF markers without creating a file</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">Client(&quot;<a href="http://localhost:8101/mcp/sse">http://localhost:8101/mcp/sse</a>&quot;)</span></td><td>FastMCP chooses the SSE transport because the URL ends in /sse</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">list_tools()</span></td><td>asks the server which tools it offers (MCP discovery)</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">call_tool(&quot;retrieve&quot;, {...})</span></td><td>calls the tool; <span style="font-family:'Roboto Mono'">result.data</span> is the decoded return value (a list of chunks)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">python - &lt;&lt;&#x27;EOF&#x27; ... EOF</span></td><td>runs the Python lines between the two EOF markers without creating a file</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">Client(&quot;<a href="http://localhost:8101/mcp/sse">http://localhost:8101/mcp/sse</a>&quot;)</span></td><td>FastMCP chooses the SSE transport because the URL ends in /sse</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">list_tools()</span></td><td>asks the server which tools it offers (MCP discovery)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">call_tool(&quot;retrieve&quot;, {...})</span></td><td>calls the tool; <span style="font-family:'Roboto Mono',monospace">result.data</span> is the decoded return value (a list of chunks)</td></tr>
 </table>
 <p><b>Step 9.</b> Test A2A: ask the scout agent directly for two fresh papers (peer delegation by hand):</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">python -c &quot;import asyncio; from querymesh.discovery import delegate; print(asyncio.run(delegate(&#x27;http://localhost:8105&#x27;, {&#x27;topic&#x27;: &#x27;speculative decoding&#x27;, &#x27;max_papers&#x27;: 2})))&quot;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">python -c &quot;import asyncio; from querymesh.discovery import delegate; print(asyncio.run(delegate(&#x27;http://localhost:8105&#x27;, {&#x27;topic&#x27;: &#x27;speculative decoding&#x27;, &#x27;max_papers&#x27;: 2})))&quot;</pre>
 <p><b>You should see:</b> {&#x27;added&#x27;: [...]} with 0 to 2 arXiv ids.</p>
 <p><b>Step 10.</b> Test agent discovery: build the supervisor&#x27;s phone book from the cards:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">python -c &quot;import asyncio; from querymesh import config; from querymesh.discovery import discover_agents; print(asyncio.run(discover_agents(config.AGENT_URLS)))&quot;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">python -c &quot;import asyncio; from querymesh import config; from querymesh.discovery import discover_agents; print(asyncio.run(discover_agents(config.AGENT_URLS)))&quot;</pre>
 <p><b>You should see:</b> {&#x27;retrieve&#x27;: &#x27;<a href="http://localhost:8101/mcp/sse">http://localhost:8101/mcp/sse</a>&#x27;, &#x27;grade&#x27;: &#x27;<a href="http://localhost:8102/mcp/sse">http://localhost:8102/mcp/sse</a>&#x27;, &#x27;write&#x27;: &#x27;<a href="http://localhost:8103/mcp/sse">http://localhost:8103/mcp/sse</a>&#x27;, &#x27;critic&#x27;: &#x27;<a href="http://localhost:8104/mcp/sse">http://localhost:8104/mcp/sse</a>&#x27;, &#x27;scout&#x27;: &#x27;<a href="http://localhost:8105/mcp/sse">http://localhost:8105/mcp/sse</a>&#x27;}</p>
 <p><b>Step 11.</b> To look at an agent&#x27;s own log, attach to tmux:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">tmux attach -t agents</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">tmux attach -t agents</pre>
 <p><b>Step 12.</b> Switch windows with Ctrl+B then a number (0 = retriever ... 4 = scout). You see one &quot;POST /a2a&quot; or &quot;GET /mcp/sse&quot; line per call.</p>
 <p><b>Step 13.</b> Leave tmux without stopping the agents: press Ctrl+B, release, then press D.</p>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>If you see...</b></td><td style="background-color:#e0e0e0"><b>It means...</b></td><td style="background-color:#e0e0e0"><b>Do this next</b></td></tr>
-<tr><td>curl: (7) Failed to connect</td><td>that agent is not running</td><td><span style="font-family:'Roboto Mono'">tmux attach -t agents</span>, open its window, read the error (often a missing .env value)</td></tr>
-<tr><td>Address already in use</td><td>an old agent still holds the port</td><td><span style="font-family:'Roboto Mono'">tmux kill-session -t agents</span>, then repeat Steps 1-5</td></tr>
+<tr><td>curl: (7) Failed to connect</td><td>that agent is not running</td><td><span style="font-family:'Roboto Mono',monospace">tmux attach -t agents</span>, open its window, read the error (often a missing .env value)</td></tr>
+<tr><td>Address already in use</td><td>an old agent still holds the port</td><td><span style="font-family:'Roboto Mono',monospace">tmux kill-session -t agents</span>, then repeat Steps 1-5</td></tr>
 <tr><td>ModuleNotFoundError: querymesh</td><td>the window did not start in ~/querymesh</td><td>check the command in Steps 1-5 starts with cd ~/querymesh</td></tr>
 <tr><td>Step 10 raises AgentCardResolutionError</td><td>one of the five agents is down</td><td>check Step 6, start the missing one</td></tr>
 </table>
 <p><b style="color:#1a7333">CHECKPOINT:</b> Step 6 shows five ok lines, Step 8 prints 3 ids, Step 10 prints all five skills.</p>
 <p><b>If not:</b> use the table above.</p>
 <h2>SECTION 6A.4 - Switch the supervisor to remote mode (agents over MCP, peers over A2A)</h2>
-<p><b>WHERE:</b> VS Code, file <span style="font-family:'Roboto Mono'">.env</span>, then the Terminal</p>
+<p><b>WHERE:</b> VS Code, file <span style="font-family:'Roboto Mono',monospace">.env</span>, then the Terminal</p>
 <p><b>GOAL:</b> the same graph as Part 5, but every agent call now travels over MCP/SSE to the agent servers.</p>
 <p><b>Step 1.</b> Switch WORKER_MODE to remote in .env:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">sed -i &#x27;s/^WORKER_MODE=.*/WORKER_MODE=remote/&#x27; .env</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">sed -i &#x27;s/^WORKER_MODE=.*/WORKER_MODE=remote/&#x27; .env</pre>
 <p><b>Step 2.</b> Check it:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">grep -E &#x27;^(WORKER_MODE|AGENT_URLS)=&#x27; .env</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">grep -E &#x27;^(WORKER_MODE|AGENT_URLS)=&#x27; .env</pre>
 <p><b>You should see:</b> WORKER_MODE=remote and AGENT_URLS=<a href="http://localhost:8101,...,http://localhost:8105">http://localhost:8101,...,http://localhost:8105</a></p>
 <p><b>Step 3.</b> Run the team again:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">python -m querymesh.graph &quot;How does reciprocal rank fusion merge BM25 and vector results?&quot;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">python -m querymesh.graph &quot;How does reciprocal rank fusion merge BM25 and vector results?&quot;</pre>
 <p><b>You should see:</b> the same kind of lines as in Section 5.5 (retriever, grader, writer, critic, then the answer). When we tested this exact setup with five agent servers, it printed:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">  .. retriever: 5 chunks (attempt 1)
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">  .. retriever: 5 chunks (attempt 1)
   .. grader: 5 of 5 chunks are relevant
   .. writer: answer drafted (attempt 1)
   .. critic: grounded=True</pre>
-<p><b>Step 4.</b> Run <span style="font-family:'Roboto Mono'">tmux attach -t agents</span> and look at the retriever window (Ctrl+B 0).</p>
+<p><b>Step 4.</b> Run <span style="font-family:'Roboto Mono',monospace">tmux attach -t agents</span> and look at the retriever window (Ctrl+B 0).</p>
 <p><b>You should see:</b> &quot;GET /mcp/sse&quot; and &quot;POST /mcp/messages/...&quot; lines: the supervisor reached the retriever over MCP with SSE.</p>
 <p><b>Step 5.</b> Press Ctrl+B then D to leave tmux.</p>
 <p>How peer delegation shows up: when the retriever finds fewer than 3 chunks, it finds the scout through the Agent Cards and sends it a task over A2A, then searches again. In our test the scout received the A2A task from the retriever, without the supervisor asking for it. You see it as a &quot;POST /a2a&quot; line in the scout window (Ctrl+B 4).</p>
 <p><b style="color:#bf1a1a">Watch out:</b> in remote mode, if any one agent is down, the first call raises AgentCardResolutionError (discovery needs all five cards) and the question fails loudly. That is on purpose: you notice at once. Start the missing agent (Section 6A.3) and ask again.</p>
-<p><b style="color:#bf1a1a">Watch out:</b> the agents read .env only when they start. After you change .env, restart them: <span style="font-family:'Roboto Mono'">tmux kill-session -t agents</span> and repeat Section 6A.3 Steps 1-5.</p>
+<p><b style="color:#bf1a1a">Watch out:</b> the agents read .env only when they start. After you change .env, restart them: <span style="font-family:'Roboto Mono',monospace">tmux kill-session -t agents</span> and repeat Section 6A.3 Steps 1-5.</p>
 <p><b style="color:#1a7333">CHECKPOINT:</b> Step 3 prints an answer and the retriever window shows MCP lines.</p>
 <p><b>If not:</b> set WORKER_MODE=local to confirm the graph itself works, then fix the agents with the table in Section 6A.3.</p>
 <h2>SECTION 6A.5 - Logfire: see every span (free)</h2>
@@ -407,19 +407,19 @@ EOF</pre>
 <p><b>Step 2.</b> Click <b>Sign up</b> and sign in with GitHub (or Google).</p>
 <p><b>Step 3.</b> When asked, choose a region (US or EU; pick the one nearer to you) and a username.</p>
 <p><b>Step 4.</b> Click <b>New project</b>.</p>
-<p><b>Step 5.</b> Type the project name <span style="font-family:'Roboto Mono'">querymesh</span> and click <b>Create</b>.</p>
+<p><b>Step 5.</b> Type the project name <span style="font-family:'Roboto Mono',monospace">querymesh</span> and click <b>Create</b>.</p>
 <p><b>Step 6.</b> In the project, click the gear icon <b>Settings</b>.</p>
 <p><b>Step 7.</b> Click <b>Write tokens</b>.</p>
 <p><b>Step 8.</b> Click <b>New write token</b>.</p>
 <p><b>Step 9.</b> Click the copy icon next to the token (it starts with pylf_ and is shown only once).</p>
-<p><b>Step 10.</b> In VS Code open <span style="font-family:'Roboto Mono'">.env</span> and paste it after <span style="font-family:'Roboto Mono'">LOGFIRE_TOKEN=</span>:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">LOGFIRE_TOKEN=pylf_v1_us_YOUR_TOKEN</pre>
+<p><b>Step 10.</b> In VS Code open <span style="font-family:'Roboto Mono',monospace">.env</span> and paste it after <span style="font-family:'Roboto Mono',monospace">LOGFIRE_TOKEN=</span>:</p>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">LOGFIRE_TOKEN=pylf_v1_us_YOUR_TOKEN</pre>
 <p><b>Step 11.</b> Press Ctrl+S.</p>
 <p><b>Step 12.</b> Restart the agents so they read the token:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">tmux kill-session -t agents</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">tmux kill-session -t agents</pre>
 <p><b>Step 13.</b> Repeat Section 6A.3 Steps 1-5 (start the five agents again).</p>
 <p><b>Step 14.</b> Ask one question:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">python -m querymesh.graph &quot;What is late interaction retrieval?&quot;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">python -m querymesh.graph &quot;What is late interaction retrieval?&quot;</pre>
 <p><b>Step 15.</b> In the Logfire website click <b>Live</b> (the live view).</p>
 <p><b>You should see:</b> rows for the services querymesh-retriever, querymesh-grader, querymesh-writer, querymesh-critic, spans named &quot;agent call retrieve&quot;, &quot;agent call grade&quot; ..., and HTTP spans for the calls to api.jina.ai and to localhost:8000 (vLLM). Click a row to see its duration.</p>
 <p><b>Step 16.</b> Click the &quot;agent call write&quot; span.</p>
@@ -432,21 +432,21 @@ EOF</pre>
 <p><b>GOAL:</b> every LLM call (prompt, answer, input and output tokens, time) recorded in Langfuse Cloud [27].</p>
 <p><b>Step 1.</b> Open <a href="https://cloud.langfuse.com">https://cloud.langfuse.com</a> (EU region; for the US region use <a href="https://us.cloud.langfuse.com">https://us.cloud.langfuse.com</a>).</p>
 <p><b>Step 2.</b> Click <b>Sign up</b> and create an account (GitHub, Google or e-mail).</p>
-<p><b>Step 3.</b> Click <b>New Organization</b>, type <span style="font-family:'Roboto Mono'">querymesh</span>, click <b>Create</b>.</p>
-<p><b>Step 4.</b> Click <b>New Project</b>, type <span style="font-family:'Roboto Mono'">querymesh</span>, click <b>Create</b>.</p>
+<p><b>Step 3.</b> Click <b>New Organization</b>, type <span style="font-family:'Roboto Mono',monospace">querymesh</span>, click <b>Create</b>.</p>
+<p><b>Step 4.</b> Click <b>New Project</b>, type <span style="font-family:'Roboto Mono',monospace">querymesh</span>, click <b>Create</b>.</p>
 <p><b>Step 5.</b> Open <b>Settings</b> (left menu) and click <b>API Keys</b>.</p>
 <p><b>Step 6.</b> Click <b>Create new API keys</b>.</p>
 <p><b>Step 7.</b> Copy the <b>Public Key</b> (starts with pk-lf-) and the <b>Secret Key</b> (starts with sk-lf-; shown only once).</p>
-<p><b>Step 8.</b> In VS Code open <span style="font-family:'Roboto Mono'">.env</span> and fill the three Langfuse lines:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">LANGFUSE_PUBLIC_KEY=pk-lf-YOUR_PUBLIC_KEY
+<p><b>Step 8.</b> In VS Code open <span style="font-family:'Roboto Mono',monospace">.env</span> and fill the three Langfuse lines:</p>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">LANGFUSE_PUBLIC_KEY=pk-lf-YOUR_PUBLIC_KEY
 LANGFUSE_SECRET_KEY=sk-lf-YOUR_SECRET_KEY
 LANGFUSE_BASE_URL=https://cloud.langfuse.com</pre>
 <p><b>Step 9.</b> Press Ctrl+S.</p>
 <p><b>Step 10.</b> Restart the agents (they make the LLM calls in remote mode):</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">tmux kill-session -t agents</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">tmux kill-session -t agents</pre>
 <p><b>Step 11.</b> Repeat Section 6A.3 Steps 1-5.</p>
 <p><b>Step 12.</b> Ask one question:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">python -m querymesh.graph &quot;What problems does lost-in-the-middle cause for RAG?&quot;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">python -m querymesh.graph &quot;What problems does lost-in-the-middle cause for RAG?&quot;</pre>
 <p><b>Step 13.</b> In Langfuse click <b>Tracing</b> (or <b>Traces</b>) in the left menu.</p>
 <p><b>You should see:</b> several new traces named ChatOpenAI: one from the grader, one from the writer, one from the critic (more if the loop retried).</p>
 <p><b>Step 14.</b> Click one trace, then the generation inside it.</p>
@@ -455,21 +455,21 @@ LANGFUSE_BASE_URL=https://cloud.langfuse.com</pre>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Field</b></td><td style="background-color:#e0e0e0"><b>Value</b></td><td style="background-color:#e0e0e0"><b>Why</b></td></tr>
 <tr><td>Model name</td><td>qwen3-4b</td><td>must match the name in the traces</td></tr>
-<tr><td>Match pattern</td><td>(?i)^qwen3-4b<span style="font-family:'Roboto Mono'">$</span></td><td>which traces this price applies to</td></tr>
+<tr><td>Match pattern</td><td>(?i)^qwen3-4b<span style="font-family:'Roboto Mono',monospace">$</span></td><td>which traces this price applies to</td></tr>
 <tr><td>Input / output price</td><td>your GPU cost per token, e.g. 0.0000001</td><td>self-hosted models have no public price; this lets you compare runs</td></tr>
 </table>
 <p><b style="color:#bf1a1a">Watch out:</b> the free Hobby plan gives 50,000 units per month (a unit = a trace, an observation or a score) and keeps data 30 days [27]. One question creates about 5-10 units, so about 5,000 questions per month.</p>
 <p><b style="color:#1a7333">CHECKPOINT:</b> Langfuse shows ChatOpenAI traces with token counts for your last question.</p>
 <p><b>If not:</b> no traces = keys not loaded (restart the agents) or wrong region (keys from cloud.langfuse.com do not work on us.cloud.langfuse.com).</p>
 <h2>SECTION 6A.7 - Create auth.py and api.py, then test the API with curl</h2>
-<p><b>WHERE:</b> VS Code Explorer, folder <span style="font-family:'Roboto Mono'">querymesh</span>, then the Terminal</p>
+<p><b>WHERE:</b> VS Code Explorer, folder <span style="font-family:'Roboto Mono',monospace">querymesh</span>, then the Terminal</p>
 <p><b>GOAL:</b> a web API with a login (POST /token gives a JWT), a protected POST /ask, and POST /ask/stream that streams the agents&#x27; progress as Server-Sent Events, with the cache in front.</p>
-<p><b>Step 1.</b> Right-click the folder <span style="font-family:'Roboto Mono'">querymesh</span>.</p>
+<p><b>Step 1.</b> Right-click the folder <span style="font-family:'Roboto Mono',monospace">querymesh</span>.</p>
 <p><b>Step 2.</b> Click <b>New File...</b>.</p>
-<p><b>Step 3.</b> Type <span style="font-family:'Roboto Mono'">auth.py</span> and press Enter.</p>
+<p><b>Step 3.</b> Type <span style="font-family:'Roboto Mono',monospace">auth.py</span> and press Enter.</p>
 <p><b>Step 4.</b> Paste the grey box below.</p>
 <p><b>Step 5.</b> Press Ctrl+S.</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;JWT login: POST /token gives a signed token; every protected call must send it.&quot;&quot;&quot;
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;JWT login: POST /token gives a signed token; every protected call must send it.&quot;&quot;&quot;
 from datetime import datetime, timedelta, timezone
 
 import jwt
@@ -500,24 +500,24 @@ def current_user(token: str = Depends(oauth2_scheme)) -&gt; str:
     return claims[&quot;sub&quot;]</pre>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">import jwt</span></td><td>PyJWT, the library that signs and checks JSON Web Tokens</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">from fastapi.security import OAuth2PasswordBearer</span></td><td>tells FastAPI &quot;callers send Authorization: Bearer TOKEN&quot;; it also adds a login button to the /docs page</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">oauth2_scheme = OAuth2PasswordBearer(tokenUrl=&quot;token&quot;)</span></td><td>the token is obtained at POST /token</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">def create_token(username)</span></td><td>makes a new JWT for this user</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">claims = {&quot;sub&quot;: username, &quot;iat&quot;: now, &quot;exp&quot;: now + timedelta(minutes=config.JWT_MINUTES)}</span></td><td>the token says: subject (who), issued at (when), expires (60 minutes later)</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">jwt.encode(claims, config.JWT_SECRET, algorithm=&quot;HS256&quot;)</span></td><td>signs the claims with your secret. Anyone can READ a JWT, but nobody can CHANGE it without the secret</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">def check_password(username, password)</span></td><td>compares with API_USERNAME and API_PASSWORD from .env (one admin user is enough for this project)</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">def current_user(token: str = Depends(oauth2_scheme))</span></td><td>FastAPI runs this before every protected endpoint and gives it the token from the header</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">jwt.decode(token, config.JWT_SECRET, algorithms=[&quot;HS256&quot;])</span></td><td>checks the signature and the expiry time; fails if either is wrong</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">except jwt.PyJWTError: raise HTTPException(401, ...)</span></td><td>bad or expired token = 401 Unauthorized</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">return claims[&quot;sub&quot;]</span></td><td>the endpoint receives the user name</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">import jwt</span></td><td>PyJWT, the library that signs and checks JSON Web Tokens</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">from fastapi.security import OAuth2PasswordBearer</span></td><td>tells FastAPI &quot;callers send Authorization: Bearer TOKEN&quot;; it also adds a login button to the /docs page</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">oauth2_scheme = OAuth2PasswordBearer(tokenUrl=&quot;token&quot;)</span></td><td>the token is obtained at POST /token</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">def create_token(username)</span></td><td>makes a new JWT for this user</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">claims = {&quot;sub&quot;: username, &quot;iat&quot;: now, &quot;exp&quot;: now + timedelta(minutes=config.JWT_MINUTES)}</span></td><td>the token says: subject (who), issued at (when), expires (60 minutes later)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">jwt.encode(claims, config.JWT_SECRET, algorithm=&quot;HS256&quot;)</span></td><td>signs the claims with your secret. Anyone can READ a JWT, but nobody can CHANGE it without the secret</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">def check_password(username, password)</span></td><td>compares with API_USERNAME and API_PASSWORD from .env (one admin user is enough for this project)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">def current_user(token: str = Depends(oauth2_scheme))</span></td><td>FastAPI runs this before every protected endpoint and gives it the token from the header</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">jwt.decode(token, config.JWT_SECRET, algorithms=[&quot;HS256&quot;])</span></td><td>checks the signature and the expiry time; fails if either is wrong</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">except jwt.PyJWTError: raise HTTPException(401, ...)</span></td><td>bad or expired token = 401 Unauthorized</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">return claims[&quot;sub&quot;]</span></td><td>the endpoint receives the user name</td></tr>
 </table>
-<p><b>Step 6.</b> Right-click the folder <span style="font-family:'Roboto Mono'">querymesh</span>.</p>
+<p><b>Step 6.</b> Right-click the folder <span style="font-family:'Roboto Mono',monospace">querymesh</span>.</p>
 <p><b>Step 7.</b> Click <b>New File...</b>.</p>
-<p><b>Step 8.</b> Type <span style="font-family:'Roboto Mono'">api.py</span> and press Enter.</p>
+<p><b>Step 8.</b> Type <span style="font-family:'Roboto Mono',monospace">api.py</span> and press Enter.</p>
 <p><b>Step 9.</b> Paste the grey box below.</p>
 <p><b>Step 10.</b> Press Ctrl+S.</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;The QueryMesh API: login, ask a question, or ask and stream the agents&#x27; progress.&quot;&quot;&quot;
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;The QueryMesh API: login, ask a question, or ask and stream the agents&#x27; progress.&quot;&quot;&quot;
 import json
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -580,44 +580,44 @@ async def ask_stream(body: Question, user: str = Depends(current_user)) -&gt; St
     return StreamingResponse(events(), media_type=&quot;text/event-stream&quot;)</pre>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">app = FastAPI(title=&quot;QueryMesh API&quot;, version=&quot;1.0.0&quot;)</span></td><td>the web application; FastAPI also builds interactive docs at /docs</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">observability.setup(&quot;querymesh-api&quot;, app)</span></td><td>Logfire spans for every request to the API</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">class Question(BaseModel): question: str = Field(min_length=3, max_length=500)</span></td><td>the request body must be JSON like {&quot;question&quot;: &quot;...&quot;}, 3 to 500 characters; anything else gets 422</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">@app.get(&quot;/healthz&quot;)</span></td><td>&quot;I am alive&quot; for Docker, Kubernetes and the load balancer</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">@app.post(&quot;/token&quot;)</span> with <span style="font-family:'Roboto Mono'">OAuth2PasswordRequestForm</span></td><td>login: reads username and password from a form, returns {&quot;access_token&quot;: &quot;...&quot;, &quot;token_type&quot;: &quot;bearer&quot;}</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">raise HTTPException(401, &quot;wrong username or password&quot;)</span></td><td>wrong login = 401</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">@app.post(&quot;/ask&quot;)</span> with <span style="font-family:'Roboto Mono'">user: str = Depends(current_user)</span></td><td>protected: FastAPI checks the JWT first; no or bad token = 401 before any agent runs</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">cached = cache.get(body.question)</span> / <span style="font-family:'Roboto Mono'">return {**cached, &quot;cached&quot;: True}</span></td><td>cache hit: answer in milliseconds, no GPU work</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">async for kind, value in stream_answer(body.question)</span></td><td>run the supervisor graph from Part 5 and keep the final result</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">cache.put(body.question, final)</span></td><td>store the answer for 24 hours</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">@app.post(&quot;/ask/stream&quot;)</span></td><td>the same, but streamed: the caller sees each agent step as it happens</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">async def events():</span></td><td>a generator that produces Server-Sent Events</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">app = FastAPI(title=&quot;QueryMesh API&quot;, version=&quot;1.0.0&quot;)</span></td><td>the web application; FastAPI also builds interactive docs at /docs</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">observability.setup(&quot;querymesh-api&quot;, app)</span></td><td>Logfire spans for every request to the API</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">class Question(BaseModel): question: str = Field(min_length=3, max_length=500)</span></td><td>the request body must be JSON like {&quot;question&quot;: &quot;...&quot;}, 3 to 500 characters; anything else gets 422</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">@app.get(&quot;/healthz&quot;)</span></td><td>&quot;I am alive&quot; for Docker, Kubernetes and the load balancer</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">@app.post(&quot;/token&quot;)</span> with <span style="font-family:'Roboto Mono',monospace">OAuth2PasswordRequestForm</span></td><td>login: reads username and password from a form, returns {&quot;access_token&quot;: &quot;...&quot;, &quot;token_type&quot;: &quot;bearer&quot;}</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">raise HTTPException(401, &quot;wrong username or password&quot;)</span></td><td>wrong login = 401</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">@app.post(&quot;/ask&quot;)</span> with <span style="font-family:'Roboto Mono',monospace">user: str = Depends(current_user)</span></td><td>protected: FastAPI checks the JWT first; no or bad token = 401 before any agent runs</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">cached = cache.get(body.question)</span> / <span style="font-family:'Roboto Mono',monospace">return {**cached, &quot;cached&quot;: True}</span></td><td>cache hit: answer in milliseconds, no GPU work</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">async for kind, value in stream_answer(body.question)</span></td><td>run the supervisor graph from Part 5 and keep the final result</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">cache.put(body.question, final)</span></td><td>store the answer for 24 hours</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">@app.post(&quot;/ask/stream&quot;)</span></td><td>the same, but streamed: the caller sees each agent step as it happens</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">async def events():</span></td><td>a generator that produces Server-Sent Events</td></tr>
 <tr><td>`yield f&quot;event: final<br>data: {json.dumps(...)}<br><br>&quot;`</td><td>SSE format: a line &quot;event: NAME&quot;, a line &quot;data: JSON&quot;, then an empty line ends the event</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">StreamingResponse(events(), media_type=&quot;text/event-stream&quot;)</span></td><td>sends the events one by one over the open connection</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">StreamingResponse(events(), media_type=&quot;text/event-stream&quot;)</span></td><td>sends the events one by one over the open connection</td></tr>
 </table>
 <p><b>Step 11.</b> Start the API in a new tmux window of the agents session:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">tmux new-window -t agents -n api &quot;cd ~/querymesh &amp;&amp; .venv/bin/uvicorn querymesh.api:app --host 0.0.0.0 --port 8090; bash&quot;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">tmux new-window -t agents -n api &quot;cd ~/querymesh &amp;&amp; .venv/bin/uvicorn querymesh.api:app --host 0.0.0.0 --port 8090; bash&quot;</pre>
 <p><b>Step 12.</b> Check it is alive:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:8090/healthz</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">curl -s localhost:8090/healthz</pre>
 <p><b>You should see:</b> {&quot;status&quot;:&quot;ok&quot;}</p>
 <p><b>Step 13.</b> Try /ask WITHOUT a token:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">curl -s -X POST localhost:8090/ask -H &quot;Content-Type: application/json&quot; -d &#x27;{&quot;question&quot;: &quot;What is RRF?&quot;}&#x27;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">curl -s -X POST localhost:8090/ask -H &quot;Content-Type: application/json&quot; -d &#x27;{&quot;question&quot;: &quot;What is RRF?&quot;}&#x27;</pre>
 <p><b>You should see:</b> {&quot;detail&quot;:&quot;Not authenticated&quot;} (HTTP 401: the JWT protection works)</p>
 <p><b>Step 14.</b> Log in and keep the token in a shell variable:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">TOKEN=<span style="font-family:'Roboto Mono'">$</span>(curl -s -X POST localhost:8090/token -d &quot;username=admin&amp;password=<span style="font-family:'Roboto Mono'">$</span>(grep ^API_PASSWORD .env | cut -d= -f2)&quot; | jq -r .access_token)</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">TOKEN=<span style="font-family:'Roboto Mono',monospace">$</span>(curl -s -X POST localhost:8090/token -d &quot;username=admin&amp;password=<span style="font-family:'Roboto Mono',monospace">$</span>(grep ^API_PASSWORD .env | cut -d= -f2)&quot; | jq -r .access_token)</pre>
 <p><b>Step 15.</b> Look at the token:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">echo <span style="font-family:'Roboto Mono'">$</span>TOKEN | cut -c1-40</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">echo <span style="font-family:'Roboto Mono',monospace">$</span>TOKEN | cut -c1-40</pre>
 <p><b>You should see:</b> text starting with eyJ (every JWT starts like this).</p>
 <p><b>Step 16.</b> Ask with the token:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">curl -s -X POST localhost:8090/ask -H &quot;Authorization: Bearer <span style="font-family:'Roboto Mono'">$</span>TOKEN&quot; -H &quot;Content-Type: application/json&quot; -d &#x27;{&quot;question&quot;: &quot;How does reciprocal rank fusion work?&quot;}&#x27; | jq &#x27;{cached, grounded, answer: .answer[0:120]}&#x27;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">curl -s -X POST localhost:8090/ask -H &quot;Authorization: Bearer <span style="font-family:'Roboto Mono',monospace">$</span>TOKEN&quot; -H &quot;Content-Type: application/json&quot; -d &#x27;{&quot;question&quot;: &quot;How does reciprocal rank fusion work?&quot;}&#x27; | jq &#x27;{cached, grounded, answer: .answer[0:120]}&#x27;</pre>
 <p>You should see (after 10-40 seconds): &quot;cached&quot;: false, &quot;grounded&quot;: true, and the start of the answer.</p>
 <p><b>Step 17.</b> Ask the SAME question again and time it:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">time curl -s -X POST localhost:8090/ask -H &quot;Authorization: Bearer <span style="font-family:'Roboto Mono'">$</span>TOKEN&quot; -H &quot;Content-Type: application/json&quot; -d &#x27;{&quot;question&quot;: &quot;how does reciprocal  rank fusion work?&quot;}&#x27; | jq .cached</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">time curl -s -X POST localhost:8090/ask -H &quot;Authorization: Bearer <span style="font-family:'Roboto Mono',monospace">$</span>TOKEN&quot; -H &quot;Content-Type: application/json&quot; -d &#x27;{&quot;question&quot;: &quot;how does reciprocal  rank fusion work?&quot;}&#x27; | jq .cached</pre>
 <p><b>You should see:</b> true, and real time well under 1 second: a cache hit from Upstash (the different spaces and capitals do not matter: normalisation + SHA-256).</p>
 <p><b>Step 18.</b> Watch the streaming endpoint (-N = do not buffer):</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">curl -N -s -X POST localhost:8090/ask/stream -H &quot;Authorization: Bearer <span style="font-family:'Roboto Mono'">$</span>TOKEN&quot; -H &quot;Content-Type: application/json&quot; -d &#x27;{&quot;question&quot;: &quot;What is ColBERT late interaction?&quot;}&#x27;</pre>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">curl -N -s -X POST localhost:8090/ask/stream -H &quot;Authorization: Bearer <span style="font-family:'Roboto Mono',monospace">$</span>TOKEN&quot; -H &quot;Content-Type: application/json&quot; -d &#x27;{&quot;question&quot;: &quot;What is ColBERT late interaction?&quot;}&#x27;</pre>
 <p><b>You should see:</b> lines appearing one after another:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">event: step
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">event: step
 data: &quot;retriever: 8 chunks (attempt 1)&quot;
 
 event: step
@@ -636,15 +636,15 @@ data: {&quot;answer&quot;: &quot;...&quot;, &quot;citations&quot;: [...], &quot;
 <p><b style="color:#1a7333">CHECKPOINT:</b> Step 13 gives Not authenticated, Step 16 gives an answer, Step 17 gives true.</p>
 <p><b>If not:</b> use the table above.</p>
 <h2>SECTION 6A.8 - Add the API and ingestion tests, run all tests</h2>
-<p><b>WHERE:</b> VS Code Explorer, folder <span style="font-family:'Roboto Mono'">tests</span>, then the Terminal</p>
+<p><b>WHERE:</b> VS Code Explorer, folder <span style="font-family:'Roboto Mono',monospace">tests</span>, then the Terminal</p>
 <p><b>GOAL:</b> automatic tests for the login, the protected endpoints, streaming, the cache key, the chunker and the arXiv query builder.</p>
-<p><b>Step 1.</b> Check that <span style="font-family:'Roboto Mono'">tests/__init__.py</span> exists (you created it, empty, in Section 5.7). If it is missing: right-click <span style="font-family:'Roboto Mono'">tests</span> &gt; <b>New File...</b> &gt; type <span style="font-family:'Roboto Mono'">__init__.py</span> &gt; Enter &gt; Ctrl+S.</p>
-<p><b>Step 2.</b> Right-click the folder <span style="font-family:'Roboto Mono'">tests</span>.</p>
+<p><b>Step 1.</b> Check that <span style="font-family:'Roboto Mono',monospace">tests/__init__.py</span> exists (you created it, empty, in Section 5.7). If it is missing: right-click <span style="font-family:'Roboto Mono',monospace">tests</span> &gt; <b>New File...</b> &gt; type <span style="font-family:'Roboto Mono',monospace">__init__.py</span> &gt; Enter &gt; Ctrl+S.</p>
+<p><b>Step 2.</b> Right-click the folder <span style="font-family:'Roboto Mono',monospace">tests</span>.</p>
 <p><b>Step 3.</b> Click <b>New File...</b>.</p>
-<p><b>Step 4.</b> Type <span style="font-family:'Roboto Mono'">test_api.py</span> and press Enter.</p>
+<p><b>Step 4.</b> Type <span style="font-family:'Roboto Mono',monospace">test_api.py</span> and press Enter.</p>
 <p><b>Step 5.</b> Paste the grey box below.</p>
 <p><b>Step 6.</b> Press Ctrl+S.</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;Test login (JWT), protected endpoints and streaming, with fake agents.&quot;&quot;&quot;
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;Test login (JWT), protected endpoints and streaming, with fake agents.&quot;&quot;&quot;
 from fastapi.testclient import TestClient
 
 from querymesh import api, cache
@@ -688,23 +688,23 @@ def test_cache_key_ignores_case_and_spaces():
     assert cache_key(&quot;What is RAG?&quot;) != cache_key(&quot;What is RRF?&quot;)</pre>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">from fastapi.testclient import TestClient</span></td><td>calls the API in memory, without starting a server</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">from tests.test_graph import fake_skills</span></td><td>re-uses the fake agents from Part 5, so no GPU is needed</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">def token()</span></td><td>logs in with admin/admin (the defaults when no .env is present, as in GitHub Actions) and returns the JWT</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">test_health</span></td><td>/healthz answers {&quot;status&quot;: &quot;ok&quot;}</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">test_wrong_password</span></td><td>a wrong password gives 401</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">test_ask_needs_token</span></td><td>/ask without a token gives 401</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">test_ask_and_stream</span></td><td>with fake agents and the cache switched off: /ask returns grounded=True and cached=False; /ask/stream contains step and final events</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">grounded_sequence=(True, True)</span></td><td>two critic verdicts, because the test asks twice (once /ask, once /ask/stream)</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">monkeypatch.setattr(cache, &quot;get&quot;, lambda q: None)</span></td><td>the cache always misses during the test</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">test_cache_key_ignores_case_and_spaces</span></td><td>the same question written differently gives the same SHA-256 key; a different question gives a different key</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">from fastapi.testclient import TestClient</span></td><td>calls the API in memory, without starting a server</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">from tests.test_graph import fake_skills</span></td><td>re-uses the fake agents from Part 5, so no GPU is needed</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">def token()</span></td><td>logs in with admin/admin (the defaults when no .env is present, as in GitHub Actions) and returns the JWT</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">test_health</span></td><td>/healthz answers {&quot;status&quot;: &quot;ok&quot;}</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">test_wrong_password</span></td><td>a wrong password gives 401</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">test_ask_needs_token</span></td><td>/ask without a token gives 401</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">test_ask_and_stream</span></td><td>with fake agents and the cache switched off: /ask returns grounded=True and cached=False; /ask/stream contains step and final events</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">grounded_sequence=(True, True)</span></td><td>two critic verdicts, because the test asks twice (once /ask, once /ask/stream)</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">monkeypatch.setattr(cache, &quot;get&quot;, lambda q: None)</span></td><td>the cache always misses during the test</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">test_cache_key_ignores_case_and_spaces</span></td><td>the same question written differently gives the same SHA-256 key; a different question gives a different key</td></tr>
 </table>
-<p><b>Step 7.</b> Right-click the folder <span style="font-family:'Roboto Mono'">tests</span>.</p>
+<p><b>Step 7.</b> Right-click the folder <span style="font-family:'Roboto Mono',monospace">tests</span>.</p>
 <p><b>Step 8.</b> Click <b>New File...</b>.</p>
-<p><b>Step 9.</b> Type <span style="font-family:'Roboto Mono'">test_ingest.py</span> and press Enter.</p>
+<p><b>Step 9.</b> Type <span style="font-family:'Roboto Mono',monospace">test_ingest.py</span> and press Enter.</p>
 <p><b>Step 10.</b> Paste the grey box below.</p>
 <p><b>Step 11.</b> Press Ctrl+S.</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;Test the chunker and the arXiv query builder (no network needed).&quot;&quot;&quot;
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;Test the chunker and the arXiv query builder (no network needed).&quot;&quot;&quot;
 from querymesh.ingest import CHUNK_CHARS, chunk_markdown
 from querymesh.skills import topic_to_arxiv_query
 
@@ -722,128 +722,16 @@ def test_topic_to_arxiv_query():
         &quot;all:reciprocal AND all:rank AND all:fusion&quot;)</pre>
 <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
 <tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">markdown = &quot;# Title...&quot; + &quot;method &quot; * 400 + &quot;## References...&quot;</span></td><td>a fake paper: a title, a long Method section and a reference list</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">assert all(len(c) &lt;= CHUNK_CHARS for c in chunks)</span></td><td>no chunk is longer than 1,500 characters</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">chunks[0].startswith(&quot;# Title&quot;)</span></td><td>the first chunk starts at the first heading</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">not any(&quot;[1] x&quot; in c for c in chunks)</span></td><td>the reference list was removed</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">test_topic_to_arxiv_query</span></td><td>&quot;What is reciprocal rank fusion?&quot; becomes the arXiv query all:reciprocal AND all:rank AND all:fusion</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">markdown = &quot;# Title...&quot; + &quot;method &quot; * 400 + &quot;## References...&quot;</span></td><td>a fake paper: a title, a long Method section and a reference list</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">assert all(len(c) &lt;= CHUNK_CHARS for c in chunks)</span></td><td>no chunk is longer than 1,500 characters</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">chunks[0].startswith(&quot;# Title&quot;)</span></td><td>the first chunk starts at the first heading</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">not any(&quot;[1] x&quot; in c for c in chunks)</span></td><td>the reference list was removed</td></tr>
+<tr><td><span style="font-family:'Roboto Mono',monospace">test_topic_to_arxiv_query</span></td><td>&quot;What is reciprocal rank fusion?&quot; becomes the arXiv query all:reciprocal AND all:rank AND all:fusion</td></tr>
 </table>
 <p><b>Step 12.</b> Run all tests:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">pytest -q</pre>
-<p><b>You should see:</b> <span style="font-family:'Roboto Mono'">10 passed</span> (this is the exact result we got when we ran these tests).</p>
+<pre style="font-family:'Roboto Mono',monospace;font-size:9.5pt;background-color:#f2f2f2">pytest -q</pre>
+<p><b>You should see:</b> <span style="font-family:'Roboto Mono',monospace">10 passed</span> (this is the exact result we got when we ran these tests).</p>
 <p><b style="color:#bf1a1a">Watch out:</b> the tests must not need your .env. GitHub Actions in Part 6B runs them without secrets; that is why they use fakes and the default admin/admin login.</p>
 <p><b style="color:#1a7333">CHECKPOINT:</b> pytest prints 10 passed.</p>
 <p><b>If not:</b> &quot;ModuleNotFoundError: No module named &#x27;tests&#x27;&quot; means tests/__init__.py is missing (Step 1).</p>
-<h2>SECTION 6A.9 - Create the Gradio web chat (streams each agent step)</h2>
-<p><b>WHERE:</b> VS Code Explorer, folder <span style="font-family:'Roboto Mono'">querymesh</span>, then the Terminal, then your laptop&#x27;s browser</p>
-<p><b>GOAL:</b> a web page where you type a question and watch the agents work live, then read the cited answer.</p>
-<p><b>Step 1.</b> Right-click the folder <span style="font-family:'Roboto Mono'">querymesh</span>.</p>
-<p><b>Step 2.</b> Click <b>New File...</b>.</p>
-<p><b>Step 3.</b> Type <span style="font-family:'Roboto Mono'">api_client.py</span> and press Enter.</p>
-<p><b>Step 4.</b> Paste the grey box below.</p>
-<p><b>Step 5.</b> Press Ctrl+S.</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;Small client for the QueryMesh API, shared by the Gradio and Telegram interfaces.&quot;&quot;&quot;
-import json
-
-import httpx
-
-from querymesh import config
-
-
-def get_token() -&gt; str:
-    response = httpx.post(f&quot;{config.API_URL}/token&quot;, timeout=30,
-                          data={&quot;username&quot;: config.API_USERNAME, &quot;password&quot;: config.API_PASSWORD})
-    response.raise_for_status()
-    return response.json()[&quot;access_token&quot;]
-
-
-async def stream_question(question: str, token: str):
-    &quot;&quot;&quot;Yield (&#x27;step&#x27;, text) and finally (&#x27;final&#x27;, dict) from the API&#x27;s Server-Sent Events.&quot;&quot;&quot;
-    headers = {&quot;Authorization&quot;: f&quot;Bearer {token}&quot;}
-    async with httpx.AsyncClient(timeout=600) as http:
-        async with http.stream(&quot;POST&quot;, f&quot;{config.API_URL}/ask/stream&quot;,
-                               json={&quot;question&quot;: question}, headers=headers) as response:
-            response.raise_for_status()
-            event = &quot;message&quot;
-            async for line in response.aiter_lines():
-                if line.startswith(&quot;event: &quot;):
-                    event = line[len(&quot;event: &quot;):]
-                elif line.startswith(&quot;data: &quot;):
-                    yield event, json.loads(line[len(&quot;data: &quot;):])
-
-
-def format_final(final: dict) -&gt; str:
-    sources = &quot;\n&quot;.join(f&quot;[{c[&#x27;n&#x27;]}] {c[&#x27;title&#x27;]} - {c[&#x27;url&#x27;]}&quot; for c in final.get(&quot;citations&quot;, []))
-    flag = &quot; (from cache)&quot; if final.get(&quot;cached&quot;) else &quot;&quot;
-    return f&quot;{final.get(&#x27;answer&#x27;, &#x27;&#x27;)}\n\nSources{flag}:\n{sources or &#x27;none&#x27;}&quot;</pre>
-<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
-<tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">def get_token()</span></td><td>logs in to the API with API_USERNAME and API_PASSWORD and returns the JWT. Both user interfaces use it</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">async def stream_question(question, token)</span></td><td>calls /ask/stream and turns the SSE lines back into (&quot;step&quot;, text) and (&quot;final&quot;, dict) pairs</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">httpx.AsyncClient(timeout=600)</span></td><td>allow up to 10 minutes for a long agent run</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">http.stream(&quot;POST&quot;, ...)</span></td><td>keep the connection open and read the answer piece by piece</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">response.raise_for_status()</span></td><td>stop with a clear error on 401 or 500</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">if line.startswith(&quot;event: &quot;)</span></td><td>remember the event name (step or final)</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">elif line.startswith(&quot;data: &quot;): yield event, json.loads(...)</span></td><td>the data line holds the JSON; hand it to the caller together with the event name</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">def format_final(final)</span></td><td>turns the final result into readable text: the answer, then &quot;Sources:&quot; with one line per citation, and &quot;(from cache)&quot; when it was a cache hit</td></tr>
-</table>
-<p><b>Step 6.</b> Right-click the folder <span style="font-family:'Roboto Mono'">querymesh</span>.</p>
-<p><b>Step 7.</b> Click <b>New File...</b>.</p>
-<p><b>Step 8.</b> Type <span style="font-family:'Roboto Mono'">ui_gradio.py</span> and press Enter.</p>
-<p><b>Step 9.</b> Paste the grey box below.</p>
-<p><b>Step 10.</b> Press Ctrl+S.</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">&quot;&quot;&quot;Gradio web chat. Shows each agent step live, then the cited answer.&quot;&quot;&quot;
-import gradio as gr
-
-from querymesh import observability
-from querymesh.api_client import format_final, get_token, stream_question
-
-observability.setup(&quot;querymesh-gradio&quot;)
-
-
-async def respond(message: str, history: list):
-    token = get_token()
-    progress = &quot;&quot;
-    async for kind, value in stream_question(message, token):
-        if kind == &quot;step&quot;:
-            progress += f&quot;- {value}\n&quot;
-            yield f&quot;Working...\n{progress}&quot;
-        else:
-            yield f&quot;{format_final(value)}\n\nAgent steps:\n{progress}&quot;
-
-
-demo = gr.ChatInterface(
-    fn=respond,
-    title=&quot;QueryMesh&quot;,
-    description=&quot;Ask a question about recent arXiv papers. Five agents search, grade, write and check.&quot;,
-    examples=[&quot;How does reciprocal rank fusion combine BM25 and vector search?&quot;,
-              &quot;What are recent methods to reduce hallucination in RAG?&quot;],
-)
-
-if __name__ == &quot;__main__&quot;:
-    demo.launch(server_name=&quot;0.0.0.0&quot;, server_port=7860)</pre>
-<table border="1" cellpadding="5" style="border-collapse:collapse;width:100%">
-<tr><td style="background-color:#e0e0e0"><b>Line(s)</b></td><td style="background-color:#e0e0e0"><b>What it does (plain English)</b></td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">import gradio as gr</span></td><td>Gradio builds web interfaces for Python functions [29]</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">async def respond(message, history)</span></td><td>Gradio calls this for every chat message. history = earlier messages (we do not need them)</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">token = get_token()</span></td><td>log in to our API</td></tr>
-<tr><td>`progress += f&quot;- {value}<br>&quot;<span style="font-family:'Roboto Mono'"> and </span>yield f&quot;Working...<br>{progress}&quot;`</td><td>each yield replaces the bot&#x27;s reply on the page, so the user sees the list of steps grow</td></tr>
-<tr><td>`yield f&quot;{format_final(value)}<br><br>Agent steps:<br>{progress}&quot;`</td><td>the last yield shows the answer, the sources and the steps</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">gr.ChatInterface(fn=respond, title=..., description=..., examples=[...])</span></td><td>a ready-made chat page; because respond is a generator, Gradio streams it automatically</td></tr>
-<tr><td><span style="font-family:'Roboto Mono'">demo.launch(server_name=&quot;0.0.0.0&quot;, server_port=7860)</span></td><td>serve the page on port 7860 on all interfaces of the VM</td></tr>
-</table>
-<p><b>Step 11.</b> Start the web chat in a new tmux window:</p>
-<pre style="font-family:'Roboto Mono';font-size:9.5pt;background-color:#f2f2f2">tmux new-window -t agents -n gradio &quot;cd ~/querymesh &amp;&amp; .venv/bin/python -m querymesh.ui_gradio; bash&quot;</pre>
-<p><b>Step 12.</b> In VS Code click the <b>PORTS</b> tab (next to TERMINAL).</p>
-<p><b>Step 13.</b> Click <b>Forward a Port</b>.</p>
-<p><b>Step 14.</b> Type 7860 and press Enter.</p>
-<p><b>Step 15.</b> On your laptop open <a href="http://localhost:7860">http://localhost:7860</a></p>
-<p><b>You should see:</b> a page titled QueryMesh with a chat box and two example questions.</p>
-<p><b>Step 16.</b> Click the first example question.</p>
-<p><b>You should see:</b> &quot;Working...&quot; and a growing list (- retriever: ..., - grader: ..., ...), then the answer with Sources and Agent steps.</p>
-<p><b>Step 17.</b> Click the same example again.</p>
-<p><b>You should see:</b> the answer appears almost at once with &quot;Sources (from cache):&quot;.</p>
-<p><b style="color:#bf1a1a">Watch out:</b> the web page itself has no login in this project; anyone who can reach port 7860 can ask questions. That is why we reach it only through VS Code port forwarding (the Hyperstack firewall keeps 7860 closed). In Part 6B it sits behind the load balancer; Part 7 lists how to add a login.</p>
-<p><b style="color:#1a7333">CHECKPOINT:</b> the page shows the steps live and then a cited answer.</p>
-<p><b>If not:</b> &quot;Connection refused&quot; in the page means the API window is not running (Section 6A.7 Step 11).</p>
 </body></html>
